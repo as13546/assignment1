@@ -1,0 +1,16 @@
+{
+  "name": "cs2680-assignment1",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A web page that drives Claude Code headless mode and renders its trajectory live.",
+  "scripts": {
+    "start": "bun run src/server.ts",
+    "dev": "bun run src/server.ts",
+    "test": "bun test",
+    "typecheck": "bunx tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.3"
+  }
+}

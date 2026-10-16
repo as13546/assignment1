@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>assignment1 · watching a coding agent</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="logo">▚</span>
+    <span class="title">watching a coding agent</span>
+    <span class="sub">Claude Code, headless, streamed live</span>
+  </div>
+
+  <div class="topbar-controls">
+    <label class="field">
+      <span class="field-label">working directory</span>
+      <input id="cwd" type="text" spellcheck="false" autocomplete="off" placeholder="/path/to/a/repo">
+    </label>
+
+    <label class="toggle" title="Show the counter that replaces the counting-only events (thinking tokens, hook plumbing). They are never listed one per line.">
+      <input id="noise" type="checkbox" checked>
+      <span>chatter counter</span>
+    </label>
+
+    <button id="clear" class="ghost" type="button" title="Forget the runs on this page (the agent is untouched)">clear</button>
+
+    <span id="conn" class="conn" data-state="connecting" title="WebSocket to the server">connecting…</span>
+  </div>
+</header>
+
+<main class="layout">
+
+  <aside id="outline-rail" class="rail" aria-label="trajectory outline">
+    <div class="rail-head">
+      <span>outline</span>
+      <span class="rail-hint">click to jump</span>
+    </div>
+    <ol id="outline" class="outline"></ol>
+    <p id="outline-empty" class="rail-empty">Calls appear here as the agent makes them.</p>
+  </aside>
+
+  <section id="trajectory" class="trajectory">
+    <div id="empty-state" class="empty-state">
+      <h1>Point an agent at a repository and watch it work.</h1>
+      <p>
+        Type a request below. The server spawns
+        <code>claude -p … --output-format stream-json --verbose</code> in the working
+        directory above and forwards every event here as it arrives, so you see each
+        file it reads, each command it runs, and what that costs.
+      </p>
+      <p class="empty-hint">
+        The cwd defaults to the repository the server was started in. Try
+        <em>“find the bug that makes test_parse fail and fix it”</em>.
+      </p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="composer">
+  <div id="resume-note" class="resume-note" hidden></div>
+  <div class="composer-row">
+    <textarea id="prompt" rows="2" placeholder="Ask the agent to do something…  (⌘/Ctrl + ⏎ to run)" spellcheck="false"></textarea>
+    <div class="composer-buttons">
+      <button id="stop" class="danger" type="button" hidden>stop</button>
+      <button id="run" class="primary" type="button">run</button>
+    </div>
+  </div>
+  <details id="dev" class="dev">
+    <summary>dev: replay a recorded stream instead of spawning the agent</summary>
+    <p class="dev-note">
+      Replay is instant and free, which is how the rendering was developed. It is
+      <strong>not</strong> a substitute for a live run in the demo — it cannot show events
+      arriving late, and it has no real session id to resume.
+    </p>
+    <div id="fixtures" class="fixtures"></div>
+  </details>
+</footer>
+
+<script type="module" src="/app.js"></script>
+</body>
+</html>
