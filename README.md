@@ -1,6 +1,9 @@
 # Assignment 1 — 一个观察 coding agent 工作过程的页面
+这是哈佛的最新Agent的课程CS2680 Modern AI Systems: Agents and System Optimizations，链接是https://cs2680.seas.harvard.edu/assignments/
 
-一个网页，用来驱动 Claude Code 并实时展示它正在做什么。你输入请求，服务器在你指定的工作目录里启动 agent，页面逐个事件地渲染它的轨迹。
+
+以下是对项目的介绍
+这是一个展示claudecode的工作网页，用来驱动 Claude Code 并实时展示它正在做什么。当你输入请求时，服务器就会在你指定的工作目录里启动 agent，而这个页面将会对逐个事件地渲染agent的轨迹。
 
 ## 运行
 
@@ -13,10 +16,6 @@ bun run src/server.ts --cwd /path/to/a/repo
 
 然后打开 <http://127.0.0.1:5173>。`--cwd` 是 agent 的工作目录，也是页面上「working directory」输入框的默认值；不传就用启动服务器时所在的目录。
 
-```bash
-bun test                        # 80 个测试
-bunx tsc --noEmit               # 类型检查
-```
 
 ### 参数
 
@@ -24,11 +23,11 @@ bunx tsc --noEmit               # 类型检查
 | --- | --- |
 | `--cwd <dir>` | agent 的默认工作目录 |
 | `--port <n>` | 端口，默认 5173 |
-| `--host <addr>` | 绑定地址，默认 127.0.0.1 |
-| `--token <secret>` | 要求每个请求都带这个 token（见下文「对外暴露」） |
+| `--host <addr>` | 地址，默认 127.0.0.1 |
+| `--token <secret>` | 要求每个请求都携带这个 token（见下文「对外暴露」） |
 | `--claude <path>` | 要启动的 CLI，默认 `claude` |
 | `--replay-delay <ms>` | 回放时每个事件之间的间隔，默认 30 |
-| `--no-skip-permissions` | **不**传 `--dangerously-skip-permissions` |
+| `--no-skip-permissions` | 不传 `--dangerously-skip-permissions` |
 
 ## 工作原理
 
@@ -67,11 +66,7 @@ claude -p "<prompt>" --output-format stream-json --verbose
 
 在必需功能之外还做了：停止按钮、对所有展示文本做一次密钥脱敏、「chatter counter」把纯计数事件折叠起来、outline 点击跳转、长子 agent 运行自动折叠，以及深链 `/?replay=<fixture>`（打开页面即回放一份录制流）。
 
-## 流本身逼出来的两个设计决定
 
-**绝大多数事件不携带信息。** 在一次录制运行里，**207 个事件中有 200 个是 `system/thinking_tokens`**。照单渲染会把轨迹彻底淹掉，所以它们被聚合成一个计数器。`system/hook_started` 和 `system/hook_response` 同样处理；无法识别的事件类型一律忽略而不是画出来。
-
-**发起委派的工具真实名字是 `Agent`，不是 `Task`。** 作业文档在描述功能 7 时写的是 `Task`，但当前版本实际发出的是 `Agent`。两者都做了处理。
 
 ## 录制流（回放）
 
