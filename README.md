@@ -1,16 +1,17 @@
 # Assignment 1 — 一个观察 coding agent 工作过程的页面
 这是哈佛的最新Agent的课程CS2680 Modern AI Systems: Agents and System Optimizations，链接是https://cs2680.seas.harvard.edu/assignments/
 
-
 以下是对项目的介绍
-这是一个展示claudecode的工作网页，用来驱动 Claude Code 并实时展示它正在做什么。当你输入请求时，服务器就会在你指定的工作目录里启动 agent，而这个页面将会对逐个事件地渲染agent的轨迹。
+这是一个展示claudecode的工作原理的网页，作用是用来驱动 Claude Code 并实时展示它正在做什么。当你输入请求时，服务器就会在你指定的工作目录里启动 agent，而这个页面将会对逐个事件地渲染agent的轨迹。
 
 ## 运行
 
 需要 [Bun](https://bun.sh)，以及一个已登录的 `claude` CLI。**没有 `npm install` 这一步**：服务器用的是 Bun 内置的 HTTP 和 WebSocket，页面本身零依赖。
 
 ```bash
-bun install                     # 只装 @types/bun，给类型检查用
+
+cd H:/init_claude/assignment1
+bun install
 bun run src/server.ts --cwd /path/to/a/repo
 ```
 
