@@ -30,6 +30,46 @@ const ui = {
 const token = new URLSearchParams(location.search).get('token');
 const withToken = (url) => (token ? `${url}${url.includes('?') ? '&' : '?'}token=${encodeURIComponent(token)}` : url);
 
+const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+
+/* ---------------------------------------------------------- window chrome */
+
+const THEME_KEY = 'agent-view-theme';
+const themeButtons = [...document.querySelectorAll('[data-theme-choice]')];
+let themeChoice = 'auto';
+
+function applyTheme(choice) {
+  themeChoice = choice;
+  if (choice === 'auto') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = choice;
+  for (const button of themeButtons) {
+    button.setAttribute('aria-pressed', String(button.dataset.themeChoice === choice));
+  }
+}
+
+try { themeChoice = localStorage.getItem(THEME_KEY) ?? 'auto'; } catch {}
+applyTheme(themeChoice);
+
+for (const button of themeButtons) {
+  button.addEventListener('click', () => {
+    applyTheme(button.dataset.themeChoice);
+    try { localStorage.setItem(THEME_KEY, themeChoice); } catch {}
+  });
+}
+
+// The translucent bars float over the scroll areas, so their measured heights
+// set the content insets when the toolbar wraps or the dev panel opens.
+const topbar = document.querySelector('.topbar');
+const composerBar = document.querySelector('.composer');
+const syncChrome = () => {
+  const style = document.documentElement.style;
+  style.setProperty('--topbar-h', `${topbar.offsetHeight}px`);
+  style.setProperty('--composer-h', `${composerBar.offsetHeight}px`);
+};
+new ResizeObserver(syncChrome).observe(topbar);
+new ResizeObserver(syncChrome).observe(composerBar);
+syncChrome();
+
 /** runId -> run view model. */
 const runs = new Map();
 const order = [];
@@ -72,10 +112,10 @@ function connect() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const ws = new WebSocket(withToken(`${proto}//${location.host}/ws`));
 
-  ws.addEventListener('open', () => { ui.conn.dataset.state = 'open'; ui.conn.textContent = 'live'; });
+  ws.addEventListener('open', () => { ui.conn.dataset.state = 'open'; ui.conn.textContent = 'Connected'; });
   ws.addEventListener('close', () => {
     ui.conn.dataset.state = 'closed';
-    ui.conn.textContent = 'reconnecting…';
+    ui.conn.textContent = 'Reconnecting…';
     setTimeout(connect, 1500);
   });
   ws.addEventListener('error', () => ws.close());
@@ -144,11 +184,13 @@ function renderAll(run) {
   run.nodeOrder = [];
   run.subs.clear();
   run.els.body.replaceChildren();
+  run.bulk = true;
   for (const node of run.state?.nodes ?? []) {
     run.nodes.set(node.id, node);
     run.nodeOrder.push(node.id);
     placeNode(run, node);
   }
+  run.bulk = false;
   updateFoot(run);
   markOutlineDirty();
 }
@@ -250,7 +292,7 @@ function updateFoot(run) {
 
   const pill = document.createElement('span');
   pill.className = `pill ${run.status}`;
-  pill.textContent = run.status === 'running' ? '● running' : run.status === 'finished' ? '✓ finished' : '✕ failed';
+  pill.textContent = run.status === 'running' ? 'Running' : run.status === 'finished' ? 'Finished' : 'Failed';
   foot.append(pill);
 
   if (run.stats) {
@@ -314,6 +356,9 @@ function containerFor(run, node) {
 function placeNode(run, node) {
   const el = renderNode(run, node);
   node.__el = el;
+  // Only nodes that arrive while watching animate in; a rebuild on reload
+  // should settle the page instantly.
+  if (!run.bulk) el.classList.add('is-new');
   const sub = containerFor(run, node);
   if (sub) {
     sub.body.append(el);
@@ -431,8 +476,8 @@ function resultElement(node) {
     fold.hidden = false;
     const hidden = result.totalLines - result.previewLines;
     fold.textContent = expanded
-      ? '▾ show less'
-      : `▸ ${hidden} more line${hidden === 1 ? '' : 's'}, folded${result.capped ? ' (result capped for transport)' : ''}`;
+      ? 'Show less'
+      : `Show ${hidden} more line${hidden === 1 ? '' : 's'}${result.capped ? ' · result capped for transport' : ''}`;
   };
   fold.addEventListener('click', () => { expanded = !expanded; draw(); });
   draw();
@@ -478,6 +523,27 @@ function markOutlineDirty() {
   requestAnimationFrame(() => { outlineDirty = false; renderOutline(); });
 }
 
+let outlineActiveRaf = 0;
+
+/** Highlight the last call above the reading line, so the rail tracks the eye. */
+function markActiveOutline() {
+  outlineActiveRaf = 0;
+  if (!ui.outline.children.length) return;
+  const line = ui.trajectory.getBoundingClientRect().top + 200;
+  let activeKey = null;
+  for (const el of ui.trajectory.querySelectorAll('.tool')) {
+    // Collapsed subagent children have no box; they must not claim the rail.
+    if (!el.getClientRects().length) continue;
+    if (el.getBoundingClientRect().top > line) break;
+    const runId = el.closest('.turn')?.dataset.runId;
+    if (runId && el.dataset.nodeId) activeKey = `${runId}:${el.dataset.nodeId}`;
+  }
+  for (const li of ui.outline.children) {
+    if (li.dataset.key && li.dataset.key === activeKey) li.dataset.active = 'true';
+    else delete li.dataset.active;
+  }
+}
+
 function depthOf(run, node) {
   let depth = 0;
   let cur = node;
@@ -512,6 +578,8 @@ function renderOutline() {
       if (depth > 0) li.classList.add('nested');
       li.dataset.status = node.status;
       li.dataset.nodeId = node.id;
+      // Replayed fixtures reuse tool ids across runs, so scope the key to its turn.
+      li.dataset.key = `${runId}:${node.id}`;
 
       const dot = document.createElement('span');
       dot.className = 'dot';
@@ -528,6 +596,7 @@ function renderOutline() {
 
   ui.outline.replaceChildren(frag);
   ui.outlineEmpty.hidden = count > 0;
+  if (!outlineActiveRaf) outlineActiveRaf = requestAnimationFrame(markActiveOutline);
 }
 
 function jumpTo(node) {
@@ -535,11 +604,12 @@ function jumpTo(node) {
   if (!el) return;
   const parentSub = el.closest('details.sub');
   if (parentSub) parentSub.open = true;
-  el.scrollIntoView({ block: 'center', behavior: 'smooth' });
-  el.animate(
-    [{ outline: '2px solid var(--accent)' }, { outline: '2px solid transparent' }],
-    { duration: 1200, easing: 'ease-out' },
-  );
+  followOutput = false;
+  el.scrollIntoView({ block: 'center', behavior: reduceMotion.matches ? 'auto' : 'smooth' });
+  el.classList.remove('is-jumped');
+  void el.offsetWidth;
+  el.classList.add('is-jumped');
+  setTimeout(() => el.classList.remove('is-jumped'), 1200);
 }
 
 function refreshComposer() {
@@ -559,10 +629,10 @@ function refreshComposer() {
 
   if (canResume) {
     ui.resumeNote.hidden = false;
-    ui.resumeNote.textContent = `↻ the next prompt resumes session ${short(last.meta.sessionId)}`;
+    ui.resumeNote.textContent = `Continues session ${short(last.meta.sessionId)}`;
   } else if (running) {
     ui.resumeNote.hidden = false;
-    ui.resumeNote.textContent = '● a run is in progress';
+    ui.resumeNote.textContent = 'A run is in progress';
   } else {
     ui.resumeNote.hidden = true;
   }
@@ -628,14 +698,42 @@ async function stopRun() {
   await fetch(withToken(`/api/turns/${target.id}/stop`), { method: 'POST' });
 }
 
+let scrollRaf = 0;
+
+/**
+ * Follow new output with a short, interruptible ease rather than a hard jump:
+ * each frame recomputes the target because the trajectory keeps growing.
+ */
 function scrollToBottom(force = false) {
   if (!force && !followOutput) return;
-  ui.trajectory.scrollTop = ui.trajectory.scrollHeight;
+  if (force || reduceMotion.matches) {
+    ui.trajectory.scrollTop = ui.trajectory.scrollHeight;
+    return;
+  }
+  if (!scrollRaf) scrollRaf = requestAnimationFrame(stepScroll);
 }
 
+function stepScroll() {
+  scrollRaf = 0;
+  if (!followOutput) return;
+  const el = ui.trajectory;
+  const distance = el.scrollHeight - el.clientHeight - el.scrollTop;
+  if (distance <= 0.5) return;
+  el.scrollTop += Math.max(1, distance * 0.22);
+  scrollRaf = requestAnimationFrame(stepScroll);
+}
+
+let lastScrollTop = 0;
 ui.trajectory.addEventListener('scroll', () => {
-  const atBottom = ui.trajectory.scrollHeight - ui.trajectory.scrollTop - ui.trajectory.clientHeight < 60;
-  followOutput = atBottom;
+  const el = ui.trajectory;
+  const top = el.scrollTop;
+  const atBottom = el.scrollHeight - top - el.clientHeight < 60;
+  // Scrolling up is a deliberate read; stop chasing the bottom. Scrolling
+  // down is harmless, and our own follow animation only increases scrollTop.
+  if (atBottom) followOutput = true;
+  else if (top < lastScrollTop) followOutput = false;
+  lastScrollTop = top;
+  if (!outlineActiveRaf) outlineActiveRaf = requestAnimationFrame(markActiveOutline);
 });
 
 ui.run.addEventListener('click', () => startRun());

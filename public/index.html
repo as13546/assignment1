@@ -3,41 +3,68 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>assignment1 · watching a coding agent</title>
+<meta name="color-scheme" content="light dark">
+<title>Assignment 1 · Watching a coding agent</title>
 <link rel="stylesheet" href="/style.css">
+<script>
+  try {
+    const t = localStorage.getItem('agent-view-theme');
+    if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+  } catch {}
+</script>
 </head>
 <body>
 
 <header class="topbar">
   <div class="brand">
-    <span class="logo">▚</span>
-    <span class="title">watching a coding agent</span>
-    <span class="sub">Claude Code, headless, streamed live</span>
+    <span class="logo" aria-hidden="true">
+      <svg viewBox="0 0 28 28" fill="none">
+        <rect width="28" height="28" rx="8" fill="url(#mark)"/>
+        <path d="M9.2 18.6 14 9.2l4.8 9.4" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"/>
+        <circle cx="14" cy="20.4" r="1.35" fill="#fff"/>
+        <defs>
+          <linearGradient id="mark" x1="1" y1="0" x2="27" y2="28" gradientUnits="userSpaceOnUse">
+            <stop stop-color="#0A84FF"/><stop offset="1" stop-color="#5E5CE6"/>
+          </linearGradient>
+        </defs>
+      </svg>
+    </span>
+    <span class="brand-text">
+      <span class="title">Watching a coding agent</span>
+      <span class="sub">Claude Code · headless · streamed live</span>
+    </span>
   </div>
 
   <div class="topbar-controls">
     <label class="field">
-      <span class="field-label">working directory</span>
+      <span class="field-label">Workspace</span>
       <input id="cwd" type="text" spellcheck="false" autocomplete="off" placeholder="/path/to/a/repo">
     </label>
 
-    <label class="toggle" title="Show the counter that replaces the counting-only events (thinking tokens, hook plumbing). They are never listed one per line.">
+    <label class="toggle" title="Fold counting-only events (thinking tokens, hook plumbing) into a counter instead of listing each one.">
       <input id="noise" type="checkbox" checked>
-      <span>chatter counter</span>
+      <span class="switch" aria-hidden="true"></span>
+      <span class="toggle-label">Chatter</span>
     </label>
 
-    <button id="clear" class="ghost" type="button" title="Forget the runs on this page (the agent is untouched)">clear</button>
+    <div class="theme" role="group" aria-label="Appearance">
+      <button type="button" data-theme-choice="auto" aria-pressed="true">Auto</button>
+      <button type="button" data-theme-choice="light" aria-pressed="false">Light</button>
+      <button type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
+    </div>
 
-    <span id="conn" class="conn" data-state="connecting" title="WebSocket to the server">connecting…</span>
+    <button id="clear" class="ghost" type="button" title="Forget the runs on this page (the agent is untouched)">Clear</button>
+
+    <span id="conn" class="conn" data-state="connecting" title="WebSocket to the server">Connecting…</span>
   </div>
 </header>
 
 <main class="layout">
 
-  <aside id="outline-rail" class="rail" aria-label="trajectory outline">
+  <aside id="outline-rail" class="rail" aria-label="Trajectory outline">
     <div class="rail-head">
-      <span>outline</span>
-      <span class="rail-hint">click to jump</span>
+      <span>Outline</span>
+      <span class="rail-hint">Click to jump</span>
     </div>
     <ol id="outline" class="outline"></ol>
     <p id="outline-empty" class="rail-empty">Calls appear here as the agent makes them.</p>
@@ -45,16 +72,21 @@
 
   <section id="trajectory" class="trajectory">
     <div id="empty-state" class="empty-state">
-      <h1>Point an agent at a repository and watch it work.</h1>
+      <div class="empty-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none">
+          <path d="M12 3.5c.5 3.9 1.6 5 5.5 5.5-3.9.5-5 1.6-5.5 5.5-.5-3.9-1.6-5-5.5-5.5 3.9-.5 5-1.6 5.5-5.5Z" fill="currentColor"/>
+          <path d="M18 14.5c.25 1.95.8 2.5 2.75 2.75-1.95.25-2.5.8-2.75 2.75-.25-1.95-.8-2.5-2.75-2.75 1.95-.25 2.5-.8 2.75-2.75Z" fill="currentColor" opacity=".7"/>
+        </svg>
+      </div>
+      <h1>Point an agent at a repository<br>and watch it work.</h1>
       <p>
-        Type a request below. The server spawns
-        <code>claude -p … --output-format stream-json --verbose</code> in the working
-        directory above and forwards every event here as it arrives, so you see each
-        file it reads, each command it runs, and what that costs.
+        Type a request below. The server runs
+        <code>claude -p … --output-format stream-json --verbose</code> in the workspace
+        above and streams every event back, so you see each file it reads, each command
+        it runs, and what that costs.
       </p>
       <p class="empty-hint">
-        The cwd defaults to the repository the server was started in. Try
-        <em>“find the bug that makes test_parse fail and fix it”</em>.
+        Try <em>“find the bug that makes test_parse fail and fix it”</em>.
       </p>
     </div>
   </section>
@@ -62,23 +94,25 @@
 </main>
 
 <footer class="composer">
-  <div id="resume-note" class="resume-note" hidden></div>
-  <div class="composer-row">
-    <textarea id="prompt" rows="2" placeholder="Ask the agent to do something…  (⌘/Ctrl + ⏎ to run)" spellcheck="false"></textarea>
-    <div class="composer-buttons">
-      <button id="stop" class="danger" type="button" hidden>stop</button>
-      <button id="run" class="primary" type="button">run</button>
+  <div class="composer-inner">
+    <div id="resume-note" class="resume-note" hidden></div>
+    <div class="composer-row">
+      <textarea id="prompt" rows="2" placeholder="Ask the agent to do something…  (⌘/Ctrl + ⏎ to run)" spellcheck="false"></textarea>
+      <div class="composer-buttons">
+        <button id="stop" class="danger" type="button" hidden>Stop</button>
+        <button id="run" class="primary" type="button">Run</button>
+      </div>
     </div>
+    <details id="dev" class="dev">
+      <summary>Replay a recorded stream instead of spawning the agent</summary>
+      <p class="dev-note">
+        Replay is instant and free, which is how the rendering was developed. It is
+        <strong>not</strong> a substitute for a live run in the demo — it cannot show events
+        arriving late, and it has no real session id to resume.
+      </p>
+      <div id="fixtures" class="fixtures"></div>
+    </details>
   </div>
-  <details id="dev" class="dev">
-    <summary>dev: replay a recorded stream instead of spawning the agent</summary>
-    <p class="dev-note">
-      Replay is instant and free, which is how the rendering was developed. It is
-      <strong>not</strong> a substitute for a live run in the demo — it cannot show events
-      arriving late, and it has no real session id to resume.
-    </p>
-    <div id="fixtures" class="fixtures"></div>
-  </details>
 </footer>
 
 <script type="module" src="/app.js"></script>
