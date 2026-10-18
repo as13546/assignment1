@@ -29,6 +29,7 @@ interface Config {
   claudeBin: string;
   skipPermissionsDefault: boolean;
   replayDelayMs: number;
+  sessionScanRoots: string[];
 }
 
 function parseArgs(argv: string[]): Config {
@@ -36,14 +37,25 @@ function parseArgs(argv: string[]): Config {
     const i = argv.indexOf(flag);
     return i >= 0 ? argv[i + 1] : undefined;
   };
+  const defaultCwd = path.resolve(get('--cwd') ?? process.cwd());
+  const roots = (get('--session-dirs') ?? process.env.SESSION_DIRS ?? '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => path.resolve(s));
+  if (!roots.length) {
+    roots.push(defaultCwd);
+    roots.push(path.resolve(defaultCwd, '..'));
+  }
   return {
     port: Number(get('--port') ?? process.env.PORT ?? 5173),
     hostname: get('--host') ?? '127.0.0.1',
     token: get('--token') ?? process.env.DEMO_TOKEN ?? null,
-    defaultCwd: path.resolve(get('--cwd') ?? process.cwd()),
+    defaultCwd,
     claudeBin: get('--claude') ?? process.env.CLAUDE_BIN ?? 'claude',
     skipPermissionsDefault: !argv.includes('--no-skip-permissions'),
     replayDelayMs: Number(get('--replay-delay') ?? 30),
+    sessionScanRoots: [...new Set(roots)],
   };
 }
 
@@ -51,6 +63,100 @@ const config = parseArgs(process.argv.slice(2));
 const runs = new Map<string, Run>();
 
 const clients = new Set<Bun.ServerWebSocket<unknown>>();
+
+interface SessionInfo {
+  id: string;
+  path: string;
+  cwd: string | null;
+  mtime: number;
+  size: number;
+  preview: string;
+}
+
+let sessionsGranted = false;
+const SESSION_MAX_DEPTH = 4;
+
+function isUnderRoots(file: string): boolean {
+  const resolved = path.resolve(file);
+  return config.sessionScanRoots.some((root) => {
+    const r = path.resolve(root);
+    return resolved === r || resolved.startsWith(r + path.sep);
+  });
+}
+
+function findEventFiles(dir: string, depth: number): string[] {
+  if (depth > SESSION_MAX_DEPTH) return [];
+  const found: string[] = [];
+  try {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory() && entry.name !== 'node_modules' && entry.name !== '.git') {
+        found.push(...findEventFiles(full, depth + 1));
+      } else if (entry.isFile() && entry.name === 'events.jsonl') {
+        found.push(full);
+      }
+    }
+  } catch {
+    /* ignore unreadable directories */
+  }
+  return found;
+}
+
+function summarizeSession(file: string): SessionInfo {
+  const stat = fs.statSync(file);
+  let cwd: string | null = path.dirname(file);
+  let preview = '';
+  try {
+    const decoder = new TextDecoder();
+    const fd = fs.openSync(file, 'r');
+    const bytes = new Uint8Array(65536);
+    const n = fs.readSync(fd, bytes, 0, bytes.length, 0);
+    fs.closeSync(fd);
+    const head = decoder.decode(bytes.subarray(0, n));
+    for (const line of head.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const ev = JSON.parse(line);
+        if (ev.type === 'system' && ev.subtype === 'init' && ev.cwd) cwd = String(ev.cwd);
+        if (!preview && ev.type === 'assistant' && Array.isArray(ev.message?.content)) {
+          const text = ev.message.content.find((b: Record<string, unknown>) => b.type === 'text' && typeof b.text === 'string');
+          if (text) preview = String(text.text).slice(0, 120);
+        }
+        if (!preview && ev.type === 'result' && typeof ev.result === 'string') {
+          preview = ev.result.slice(0, 120);
+        }
+      } catch {
+        /* ignore malformed lines */
+      }
+    }
+  } catch {
+    /* ignore read errors */
+  }
+  return {
+    id: Buffer.from(file).toString('base64url'),
+    path: file,
+    cwd,
+    mtime: stat.mtimeMs,
+    size: stat.size,
+    preview,
+  };
+}
+
+function scanSessions(): SessionInfo[] {
+  const files = config.sessionScanRoots.flatMap((root) => findEventFiles(root, 0));
+  const unique = [...new Set(files)];
+  return unique
+    .filter((file) => fs.statSync(file).size > 0)
+    .map(summarizeSession)
+    .sort((a, b) => b.mtime - a.mtime);
+}
+
+function resolveSession(id: string): string | null {
+  const file = Buffer.from(id, 'base64url').toString('utf8');
+  if (!isUnderRoots(file)) return null;
+  if (!fs.existsSync(file) || !fs.statSync(file).isFile()) return null;
+  return file;
+}
 
 function send(ws: Bun.ServerWebSocket<unknown>, payload: unknown): void {
   try {
@@ -156,6 +262,12 @@ function startRun(body: Record<string, unknown>): { runId: string } | { error: s
     replayPath = resolveFixture(replayFile);
     if (!replayPath) return { error: `unknown fixture: ${replayFile}` };
   }
+  const sessionFile = typeof body.sessionFile === 'string' && body.sessionFile
+    ? resolveSession(body.sessionFile)
+    : null;
+  if (typeof body.sessionFile === 'string' && body.sessionFile && !sessionFile) {
+    return { error: 'unknown session' };
+  }
 
   const cwd = typeof body.cwd === 'string' && body.cwd.trim()
     ? path.resolve(body.cwd.trim())
@@ -169,7 +281,7 @@ function startRun(body: Record<string, unknown>): { runId: string } | { error: s
     prompt,
     cwd,
     resumeSessionId,
-    replayFile: replayPath,
+    replayFile: replayPath ?? sessionFile,
     replayDelayMs: config.replayDelayMs,
     skipPermissions: body.skipPermissions === undefined
       ? config.skipPermissionsDefault
@@ -186,6 +298,8 @@ function startRun(body: Record<string, unknown>): { runId: string } | { error: s
     cwd: req.cwd,
     argv: replayPath
       ? ['replay', path.relative(FIXTURES_DIR, replayPath)]
+      : sessionFile
+      ? ['replay', path.relative(process.cwd(), sessionFile)]
       : [config.claudeBin, ...buildArgs(req).map((arg, i) => (i === 0 ? '<prompt>' : arg))],
     resumedFrom: resumeSessionId,
     replayed: replayPath ? path.relative(FIXTURES_DIR, replayPath) : null,
@@ -234,8 +348,27 @@ const server = Bun.serve({
         claudeBin: config.claudeBin,
         skipPermissions: config.skipPermissionsDefault,
         fixtures: listFixtures(),
+        sessionsGranted,
+        sessions: sessionsGranted ? scanSessions() : [],
         runs: [...runs.values()].map(runSnapshot),
       });
+    }
+
+    if (url.pathname === '/api/sessions/grant' && req.method === 'POST') {
+      sessionsGranted = true;
+      return Response.json({ granted: true });
+    }
+
+    if (url.pathname === '/api/sessions/revoke' && req.method === 'POST') {
+      sessionsGranted = false;
+      return Response.json({ granted: false });
+    }
+
+    if (url.pathname === '/api/sessions') {
+      if (!sessionsGranted) {
+        return Response.json({ granted: false, sessions: [] }, { status: 403 });
+      }
+      return Response.json({ granted: true, sessions: scanSessions() });
     }
 
     if (url.pathname === '/api/turns' && req.method === 'POST') {

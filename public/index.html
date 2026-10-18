@@ -65,6 +65,7 @@
     <div class="rail-tabs" role="tablist" aria-label="Side panel">
       <button id="tab-outline" class="rail-tab" role="tab" aria-selected="true" aria-controls="outline-panel">Outline</button>
       <button id="tab-flow" class="rail-tab" role="tab" aria-selected="false" aria-controls="flow-panel">Flow</button>
+      <button id="tab-sessions" class="rail-tab" role="tab" aria-selected="false" aria-controls="sessions-panel">Sessions</button>
     </div>
     <div id="outline-panel" class="rail-panel" role="tabpanel">
       <div class="rail-head">
@@ -81,6 +82,22 @@
       </div>
       <div id="workflow" class="workflow"></div>
     </div>
+    <div id="sessions-panel" class="rail-panel" role="tabpanel" hidden>
+      <div class="rail-head">
+        <span>Sessions</span>
+        <span class="rail-hint">Recent runs</span>
+      </div>
+      <div id="sessions" class="sessions">
+        <div id="sessions-permission" class="sessions-permission">
+          <p>Allow this page to read recent Claude Code session files from your computer?</p>
+          <button id="grant-sessions" class="primary" type="button">Allow</button>
+        </div>
+        <div id="sessions-list-wrap" hidden>
+          <p id="sessions-empty" class="rail-empty">No recent sessions found.</p>
+          <ul id="sessions-list" class="sessions-list"></ul>
+        </div>
+      </div>
+    </div>
   </aside>
 
   <section id="trajectory" class="trajectory">
@@ -92,15 +109,6 @@
         </svg>
       </div>
       <h1>Point an agent at a repository<br>and watch it work.</h1>
-      <p>
-        Type a request below. The server runs
-        <code>claude -p … --output-format stream-json --verbose</code> in the workspace
-        above and streams every event back, so you see each file it reads, each command
-        it runs, and what that costs.
-      </p>
-      <p class="empty-hint">
-        Try <em>“find the bug that makes test_parse fail and fix it”</em>.
-      </p>
     </div>
   </section>
 

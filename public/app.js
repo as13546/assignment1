@@ -26,6 +26,14 @@ const ui = {
   tabFlow: $('tab-flow'),
   outlinePanel: $('outline-panel'),
   flowPanel: $('flow-panel'),
+  tabSessions: $('tab-sessions'),
+  sessionsPanel: $('sessions-panel'),
+  sessions: $('sessions'),
+  sessionsPermission: $('sessions-permission'),
+  sessionsListWrap: $('sessions-list-wrap'),
+  sessionsList: $('sessions-list'),
+  sessionsEmpty: $('sessions-empty'),
+  grantSessions: $('grant-sessions'),
   prompt: $('prompt'),
   run: $('run'),
   stop: $('stop'),
@@ -544,6 +552,78 @@ function renderWorkflowPanel() {
   const run = lastRun();
   renderWorkflow(run, ui.workflow, true);
 }
+let sessionsGranted = false;
+let sessionList = [];
+function formatTime(ms) {
+  const d = new Date(ms);
+  return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+function renderSessionsPanel() {
+  if (!sessionsGranted) {
+    ui.sessionsPermission.hidden = false;
+    ui.sessionsListWrap.hidden = true;
+    return;
+  }
+  ui.sessionsPermission.hidden = true;
+  ui.sessionsListWrap.hidden = false;
+  ui.sessionsEmpty.hidden = sessionList.length > 0;
+  ui.sessionsList.replaceChildren();
+  for (const session of sessionList) {
+    const li = document.createElement('li');
+    li.className = 'session-item';
+    li.dataset.id = session.id;
+    const top = document.createElement('div');
+    top.className = 'session-top';
+    const when = document.createElement('span');
+    when.className = 'session-when';
+    when.textContent = formatTime(session.mtime);
+    const size = document.createElement('span');
+    size.className = 'session-size';
+    size.textContent = `${(session.size / 1024).toFixed(1)} KB`;
+    top.append(when, size);
+    const cwd = document.createElement('div');
+    cwd.className = 'session-cwd';
+    cwd.textContent = session.cwd || '(unknown directory)';
+    cwd.title = session.cwd || '';
+    const preview = document.createElement('div');
+    preview.className = 'session-preview';
+    preview.textContent = session.preview || '(no preview)';
+    const replay = document.createElement('button');
+    replay.type = 'button';
+    replay.className = 'session-replay';
+    replay.textContent = 'Replay';
+    replay.addEventListener('click', (event) => {
+      event.stopPropagation();
+      startRun({ replayFile: null, sessionFile: session.id, prompt: `replay session from ${session.cwd || 'unknown'}` });
+    });
+    li.append(top, cwd, preview, replay);
+    ui.sessionsList.append(li);
+  }
+}
+async function fetchSessions() {
+  try {
+    const res = await fetch(withToken('/api/sessions'));
+    const data = await res.json();
+    sessionsGranted = data.granted ?? false;
+    sessionList = data.sessions ?? [];
+  } catch {
+    sessionsGranted = false;
+    sessionList = [];
+  }
+  if (sidePanel === 'sessions') renderSessionsPanel();
+}
+async function grantSessions() {
+  try {
+    const res = await fetch(withToken('/api/sessions/grant'), { method: 'POST' });
+    const data = await res.json();
+    sessionsGranted = data.granted ?? false;
+    if (sessionsGranted) await fetchSessions();
+  } catch {
+    sessionsGranted = false;
+  }
+  if (sidePanel === 'sessions') renderSessionsPanel();
+}
+ui.grantSessions.addEventListener('click', grantSessions);
 
 let outlineActiveRaf = 0;
 
@@ -666,12 +746,15 @@ function refreshComposer() {
 
 async function startRun(options = {}) {
   const prompt = options.prompt ?? ui.prompt.value.trim();
-  if (!prompt && !options.replayFile) return;
+  if (!prompt && !options.replayFile && !options.sessionFile) return;
 
   const body = { cwd: ui.cwd.value.trim() };
   if (options.replayFile) {
     body.replayFile = options.replayFile;
     body.prompt = prompt || `replay ${options.replayFile}`;
+  } else if (options.sessionFile) {
+    body.sessionFile = options.sessionFile;
+    body.prompt = prompt || 'replay session';
   } else {
     body.prompt = prompt;
     const last = lastRun();
@@ -769,15 +852,18 @@ ui.prompt.addEventListener('keydown', (event) => {
 ui.noise.addEventListener('change', () => { for (const run of runs.values()) updateFoot(run); });
 function setSidePanel(name) {
   sidePanel = name;
-  const isOutline = name === 'outline';
-  ui.tabOutline.setAttribute('aria-selected', String(isOutline));
-  ui.tabFlow.setAttribute('aria-selected', String(!isOutline));
-  ui.outlinePanel.hidden = !isOutline;
-  ui.flowPanel.hidden = isOutline;
-  if (!isOutline) renderWorkflowPanel();
+  ui.tabOutline.setAttribute('aria-selected', String(name === 'outline'));
+  ui.tabFlow.setAttribute('aria-selected', String(name === 'flow'));
+  ui.tabSessions.setAttribute('aria-selected', String(name === 'sessions'));
+  ui.outlinePanel.hidden = name !== 'outline';
+  ui.flowPanel.hidden = name !== 'flow';
+  ui.sessionsPanel.hidden = name !== 'sessions';
+  if (name === 'flow') renderWorkflowPanel();
+  if (name === 'sessions') renderSessionsPanel();
 }
 ui.tabOutline.addEventListener('click', () => setSidePanel('outline'));
 ui.tabFlow.addEventListener('click', () => setSidePanel('flow'));
+ui.tabSessions.addEventListener('click', () => setSidePanel('sessions'));
 
 ui.clear.addEventListener('click', () => {
   if (anyRunning()) { window.alert('A run is still going. Stop it first.'); return; }
@@ -816,6 +902,9 @@ async function boot() {
       ui.fixtures.append(button);
     }
     if (!config.fixtures?.length) ui.fixtures.textContent = '(no fixtures recorded yet)';
+    sessionsGranted = config.sessionsGranted ?? false;
+    sessionList = config.sessions ?? [];
+    if (sidePanel === 'sessions') renderSessionsPanel();
   } catch {
     /* the banner already says the socket is down */
   }
