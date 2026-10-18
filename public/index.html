@@ -62,12 +62,25 @@
 <main class="layout">
 
   <aside id="outline-rail" class="rail" aria-label="Trajectory outline">
-    <div class="rail-head">
-      <span>Outline</span>
-      <span class="rail-hint">Click to jump</span>
+    <div class="rail-tabs" role="tablist" aria-label="Side panel">
+      <button id="tab-outline" class="rail-tab" role="tab" aria-selected="true" aria-controls="outline-panel">Outline</button>
+      <button id="tab-flow" class="rail-tab" role="tab" aria-selected="false" aria-controls="flow-panel">Flow</button>
     </div>
-    <ol id="outline" class="outline"></ol>
-    <p id="outline-empty" class="rail-empty">Calls appear here as the agent makes them.</p>
+    <div id="outline-panel" class="rail-panel" role="tabpanel">
+      <div class="rail-head">
+        <span>Outline</span>
+        <span class="rail-hint">Click to jump</span>
+      </div>
+      <ol id="outline" class="outline"></ol>
+      <p id="outline-empty" class="rail-empty">Calls appear here as the agent makes them.</p>
+    </div>
+    <div id="flow-panel" class="rail-panel" role="tabpanel" hidden>
+      <div class="rail-head">
+        <span>Workflow</span>
+        <span class="rail-hint">Full lifecycle</span>
+      </div>
+      <div id="workflow" class="workflow"></div>
+    </div>
   </aside>
 
   <section id="trajectory" class="trajectory">

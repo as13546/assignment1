@@ -6,6 +6,7 @@
  */
 
 import { renderMarkdown } from './md.js';
+import { renderWorkflow } from './workflow.js';
 
 const AUTO_COLLAPSE_AFTER = 8; // subagent children before we fold them away
 
@@ -20,6 +21,11 @@ const ui = {
   outlineEmpty: $('outline-empty'),
   trajectory: $('trajectory'),
   emptyState: $('empty-state'),
+  workflow: $('workflow'),
+  tabOutline: $('tab-outline'),
+  tabFlow: $('tab-flow'),
+  outlinePanel: $('outline-panel'),
+  flowPanel: $('flow-panel'),
   prompt: $('prompt'),
   run: $('run'),
   stop: $('stop'),
@@ -78,6 +84,9 @@ let followOutput = true;
 let outlineDirty = false;
 /** True between POSTing a turn and the run showing up over the socket. */
 let starting = false;
+let workflowDirty = false;
+/** Active side panel: 'outline' | 'flow'. */
+let sidePanel = 'outline';
 
 function makeRun(snapshot) {
   return {
@@ -204,6 +213,7 @@ function applyOps(run, ops) {
         run.nodes.set(op.node.id, op.node);
         if (existing) updateNode(run, op.node);
         else { run.nodeOrder.push(op.node.id); placeNode(run, op.node); }
+        markWorkflowDirty();
         break;
       }
       case 'tool_result': {
@@ -212,6 +222,7 @@ function applyOps(run, ops) {
         node.status = op.status;
         node.result = op.result;
         updateNode(run, node);
+        markWorkflowDirty();
         break;
       }
       case 'thinking':
@@ -230,6 +241,7 @@ function applyOps(run, ops) {
         run.error = op.error;
         updateFoot(run);
         markOutlineDirty();
+        markWorkflowDirty();
         break;
     }
   }
@@ -522,6 +534,16 @@ function markOutlineDirty() {
   outlineDirty = true;
   requestAnimationFrame(() => { outlineDirty = false; renderOutline(); });
 }
+function markWorkflowDirty() {
+  if (workflowDirty) return;
+  workflowDirty = true;
+  requestAnimationFrame(() => { workflowDirty = false; renderWorkflowPanel(); });
+}
+function renderWorkflowPanel() {
+  // Show the most recent run's lifecycle; the outline already surveys all runs.
+  const run = lastRun();
+  renderWorkflow(run, ui.workflow, true);
+}
 
 let outlineActiveRaf = 0;
 
@@ -745,6 +767,17 @@ ui.prompt.addEventListener('keydown', (event) => {
   }
 });
 ui.noise.addEventListener('change', () => { for (const run of runs.values()) updateFoot(run); });
+function setSidePanel(name) {
+  sidePanel = name;
+  const isOutline = name === 'outline';
+  ui.tabOutline.setAttribute('aria-selected', String(isOutline));
+  ui.tabFlow.setAttribute('aria-selected', String(!isOutline));
+  ui.outlinePanel.hidden = !isOutline;
+  ui.flowPanel.hidden = isOutline;
+  if (!isOutline) renderWorkflowPanel();
+}
+ui.tabOutline.addEventListener('click', () => setSidePanel('outline'));
+ui.tabFlow.addEventListener('click', () => setSidePanel('flow'));
 
 ui.clear.addEventListener('click', () => {
   if (anyRunning()) { window.alert('A run is still going. Stop it first.'); return; }
@@ -764,6 +797,7 @@ function short(id) {
 async function boot() {
   connect();
   refreshComposer();
+  setSidePanel('outline');
 
   // ?replay=<fixture> renders a recorded stream on load, which is how the page
   // is checked from a script (and handy for a demo).
