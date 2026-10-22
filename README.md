@@ -1,14 +1,18 @@
-# Assignment 1 — 一个观察 coding agent 工作过程的页面
-这是哈佛的最新Agent的课程CS2680 Modern AI Systems: Agents and System Optimizations，链接是https://cs2680.seas.harvard.edu/assignments/
+#  coding agent 工作台
+
+> **这份文档是给人看的。** 它面向要读代码、跑起来、或看演示的人，讲清楚这个
+> 项目是什么、怎么跑、每个功能落在哪里。构建状态、改动记录和未完成事项这类
+> 内部信息不在这里，而在 `PROGRESS.md` —— 那份是给机器（下一个会话、`git log`
+> 或 agent）接着用的工作记录。两份文档请一起维护。
 
 以下是对项目的介绍
-这是一个展示claudecode的工作原理的网页，作用是用来驱动 Claude Code 并实时展示它正在做什么。当你输入请求时，服务器就会在你指定的工作目录里启动 agent，而这个页面将会对逐个事件地渲染agent的轨迹。
+这是一个展示claudecode的工作原理的网页，作用是用来驱动 Claude Code 并实时展示它正在做什么。当你输入请求时，服务器就会在你指定的工作目录里启动 agent，而这个页面将会对逐个事件地渲染agent的轨迹。这是哈佛的最新Agent的课程CS2680 Modern AI Systems: Agents and System Optimizations，链接是https://cs2680.seas.harvard.edu/assignments/
 
 它也可以当作一个 **agent 工作台** 来用：左侧是「对话列表」，在你授权之后读取本机 Claude Code 留下的会话记录，点开任意一个就能进入该对话；中间是调用纲要；右侧大屏承载与 agent 的交互过程和完整工作流图，一眼看清它调用了哪些工具、状态如何、花了多长时间。
 
 ## 运行
 
-需要 [Bun](https://bun.sh)，以及一个已登录的 `claude` CLI。**没有 `npm install` 这一步**：服务器用的是 Bun 内置的 HTTP 和 WebSocket，页面本身零依赖。
+
 
 ```bash
 
