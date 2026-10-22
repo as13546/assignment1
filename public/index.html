@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>Assignment 1 · Watching a coding agent</title>
+<title>Assignment 1 · Coding agent workbench</title>
 <link rel="stylesheet" href="/style.css">
 <script>
   try {
@@ -29,18 +29,9 @@
         </defs>
       </svg>
     </span>
-    <span class="brand-text">
-      <span class="title">Watching a coding agent</span>
-      <span class="sub">Claude Code · headless · streamed live</span>
-    </span>
   </div>
 
   <div class="topbar-controls">
-    <label class="field">
-      <span class="field-label">Workspace</span>
-      <input id="cwd" type="text" spellcheck="false" autocomplete="off" placeholder="/path/to/a/repo">
-    </label>
-
     <label class="toggle" title="Fold counting-only events (thinking tokens, hook plumbing) into a counter instead of listing each one.">
       <input id="noise" type="checkbox" checked>
       <span class="switch" aria-hidden="true"></span>
@@ -64,7 +55,6 @@
   <aside id="conversations-rail" class="rail rail-conversations" aria-label="Conversations">
     <div class="rail-head">
       <span>Conversations</span>
-      <span class="rail-hint">From this computer</span>
     </div>
     <div id="sessions" class="sessions">
       <div id="sessions-permission" class="sessions-permission">
@@ -79,24 +69,7 @@
     </div>
   </aside>
 
-  <aside id="outline-rail" class="rail rail-outline" aria-label="Trajectory outline">
-    <div class="rail-head">
-      <span>Outline</span>
-      <span class="rail-hint">Click to jump</span>
-    </div>
-    <ol id="outline" class="outline"></ol>
-    <p id="outline-empty" class="rail-empty">Calls appear here as the agent makes them.</p>
-  </aside>
-
   <section class="stage">
-    <div class="stage-bar">
-      <div class="viewswitch" role="tablist" aria-label="Stage view">
-        <button id="view-chat" class="viewswitch-btn" role="tab" aria-selected="true">Conversation</button>
-        <button id="view-flow" class="viewswitch-btn" role="tab" aria-selected="false">Workflow</button>
-      </div>
-      <div id="stage-stats" class="stage-stats"></div>
-    </div>
-
     <section id="trajectory" class="trajectory">
       <div id="empty-state" class="empty-state">
         <div class="empty-mark" aria-hidden="true">
@@ -105,29 +78,12 @@
             <path d="M18 14.5c.25 1.95.8 2.5 2.75 2.75-1.95.25-2.5.8-2.75 2.75-.25-1.95-.8-2.5-2.75-2.75 1.95-.25 2.5-.8 2.75-2.75Z" fill="currentColor" opacity=".7"/>
           </svg>
         </div>
-        <h1>Point an agent at a repository<br>and watch it work.</h1>
+        <h1>Open a conversation<br>from the sidebar.</h1>
       </div>
-    </section>
-
-    <section id="flow-stage" class="flow-stage" hidden>
-      <div id="workflow" class="workflow"></div>
     </section>
   </section>
 
 </main>
-
-<footer class="composer">
-  <div class="composer-inner">
-    <div id="resume-note" class="resume-note" hidden></div>
-    <div class="composer-row">
-      <textarea id="prompt" rows="2" placeholder="Ask the agent to do something…  (⌘/Ctrl + ⏎ to run)" spellcheck="false"></textarea>
-      <div class="composer-buttons">
-        <button id="stop" class="danger" type="button" hidden>Stop</button>
-        <button id="run" class="primary" type="button">Run</button>
-      </div>
-    </div>
-  </div>
-</footer>
 
 <script type="module" src="/app.js"></script>
 </body>

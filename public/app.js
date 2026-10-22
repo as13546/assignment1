@@ -1,31 +1,20 @@
 /*
  * Nothing here decides what an event means — `src/translate.ts` does that
  * server-side. This file draws nodes as they arrive and updates a tool call in
- * place when its result lands, rather than rebuilding the page on every event
- * (a run emits a few hundred, and that would fight the user's scroll).
+ * place when its result lands, rather than rebuilding the page on every event.
  */
 
 import { renderMarkdown } from './md.js';
-import { renderWorkflow } from './workflow.js';
 
 const AUTO_COLLAPSE_AFTER = 8; // subagent children before we fold them away
 
 const $ = (id) => document.getElementById(id);
 
 const ui = {
-  cwd: $('cwd'),
-  noise: $('noise'),
   clear: $('clear'),
   conn: $('conn'),
-  outline: $('outline'),
-  outlineEmpty: $('outline-empty'),
   trajectory: $('trajectory'),
   emptyState: $('empty-state'),
-  workflow: $('workflow'),
-  flowStage: $('flow-stage'),
-  viewChat: $('view-chat'),
-  viewFlow: $('view-flow'),
-  stageStats: $('stage-stats'),
   sessions: $('sessions'),
   sessionsPermission: $('sessions-permission'),
   sessionsListWrap: $('sessions-list-wrap'),
@@ -33,10 +22,7 @@ const ui = {
   sessionsEmpty: $('sessions-empty'),
   grantSessions: $('grant-sessions'),
   revokeSessions: $('revoke-sessions'),
-  prompt: $('prompt'),
-  run: $('run'),
-  stop: $('stop'),
-  resumeNote: $('resume-note'),
+  noise: $('noise'),
 };
 
 const token = new URLSearchParams(location.search).get('token');
@@ -69,17 +55,11 @@ for (const button of themeButtons) {
   });
 }
 
-// The translucent bars float over the scroll areas, so their measured heights
-// set the content insets when the toolbar wraps or the dev panel opens.
 const topbar = document.querySelector('.topbar');
-const composerBar = document.querySelector('.composer');
 const syncChrome = () => {
-  const style = document.documentElement.style;
-  style.setProperty('--topbar-h', `${topbar.offsetHeight}px`);
-  style.setProperty('--composer-h', `${composerBar.offsetHeight}px`);
+  document.documentElement.style.setProperty('--topbar-h', `${topbar.offsetHeight}px`);
 };
 new ResizeObserver(syncChrome).observe(topbar);
-new ResizeObserver(syncChrome).observe(composerBar);
 syncChrome();
 
 /** runId -> run view model. */
@@ -87,12 +67,6 @@ const runs = new Map();
 const order = [];
 let activeRunId = null;
 let followOutput = true;
-let outlineDirty = false;
-/** True between POSTing a turn and the run showing up over the socket. */
-let starting = false;
-let workflowDirty = false;
-/** What the big stage shows: 'chat' (dialogue) or 'flow' (lifecycle diagram). */
-let stageView = 'chat';
 
 function makeRun(snapshot) {
   return {
@@ -145,7 +119,6 @@ function connect() {
 function handle(payload) {
   switch (payload.kind) {
     case 'snapshot':
-      // A page that loaded (or reloaded) mid-run rebuilds from server state.
       for (const snapshot of payload.runs) ingestSnapshot(snapshot);
       break;
     case 'run_started':
@@ -157,7 +130,6 @@ function handle(payload) {
     case 'run_end': {
       const run = runs.get(payload.runId);
       if (run) run.els?.root.classList.remove('running');
-      refreshComposer();
       break;
     }
   }
@@ -179,7 +151,7 @@ function ingestSnapshot(snapshot) {
   run.replayed = snapshot.replayed ?? null;
 
   const state = snapshot.state ?? {};
-  run.state = state; // the full node list, used when rebuilding the DOM
+  run.state = state;
   run.meta.sessionId = state.sessionId ?? null;
   run.meta.model = state.model ?? null;
   run.status = state.status ?? 'running';
@@ -190,7 +162,6 @@ function ingestSnapshot(snapshot) {
 
   if (isNew) mountTurn(run);
   renderAll(run);
-  refreshComposer();
 }
 
 /** Rebuild one turn's DOM from its full node list (used on attach/reload). */
@@ -207,7 +178,6 @@ function renderAll(run) {
   }
   run.bulk = false;
   updateFoot(run);
-  markOutlineDirty();
 }
 
 function applyOps(run, ops) {
@@ -219,7 +189,6 @@ function applyOps(run, ops) {
         run.nodes.set(op.node.id, op.node);
         if (existing) updateNode(run, op.node);
         else { run.nodeOrder.push(op.node.id); placeNode(run, op.node); }
-        markWorkflowDirty();
         break;
       }
       case 'tool_result': {
@@ -228,7 +197,6 @@ function applyOps(run, ops) {
         node.status = op.status;
         node.result = op.result;
         updateNode(run, node);
-        markWorkflowDirty();
         break;
       }
       case 'thinking':
@@ -239,15 +207,12 @@ function applyOps(run, ops) {
       case 'meta':
         run.meta = { sessionId: op.sessionId, model: op.model, cwd: op.cwd };
         updateFoot(run);
-        refreshComposer();
         break;
       case 'run':
         run.status = op.status;
         run.stats = op.stats;
         run.error = op.error;
         updateFoot(run);
-        markOutlineDirty();
-        markWorkflowDirty();
         break;
     }
   }
@@ -362,7 +327,6 @@ function updateFoot(run) {
     errorBanner.hidden = true;
   }
   root.classList.toggle('running', run.status === 'running');
-  updateStageStats();
 }
 
 function containerFor(run, node) {
@@ -375,8 +339,6 @@ function containerFor(run, node) {
 function placeNode(run, node) {
   const el = renderNode(run, node);
   node.__el = el;
-  // Only nodes that arrive while watching animate in; a rebuild on reload
-  // should settle the page instantly.
   if (!run.bulk) el.classList.add('is-new');
   const sub = containerFor(run, node);
   if (sub) {
@@ -386,7 +348,6 @@ function placeNode(run, node) {
   } else {
     run.els.body.append(el);
   }
-  markOutlineDirty();
 }
 
 function updateNode(run, node) {
@@ -398,7 +359,6 @@ function updateNode(run, node) {
     const sub = containerFor(run, node);
     (sub ? sub.body : run.els.body).append(el);
   }
-  markOutlineDirty();
 }
 
 function renderNode(run, node) {
@@ -476,7 +436,6 @@ function toolElement(run, node) {
     wrap.append(resultElement(node));
   }
 
-  // Where this call's subagent events will be nested (feature 7).
   const slot = document.createElement('div');
   slot.className = 'sub-slot';
   wrap.append(slot);
@@ -524,7 +483,7 @@ function createSubContainer(run, parentId) {
 
   const details = document.createElement('details');
   details.className = 'sub';
-  details.open = true; // short subagent runs read better open; long ones fold below
+  details.open = true;
   const summary = document.createElement('summary');
   const body = document.createElement('div');
   body.className = 'sub-body';
@@ -548,61 +507,16 @@ function createSubContainer(run, parentId) {
   return sub;
 }
 
-function markOutlineDirty() {
-  if (outlineDirty) return;
-  outlineDirty = true;
-  requestAnimationFrame(() => { outlineDirty = false; renderOutline(); });
-}
-function markWorkflowDirty() {
-  if (workflowDirty) return;
-  workflowDirty = true;
-  // A run emits a few hundred events; rebuilding the whole tree on each one is
-  // wasted work, and an invisible tree does not need rebuilding at all.
-  if (stageView !== 'flow') return;
-  setTimeout(() => {
-    if (!workflowDirty) return;
-    workflowDirty = false;
-    renderWorkflowPanel();
-  }, 120);
-}
-function renderWorkflowPanel() {
-  // Show the most recent run's lifecycle on the big screen.
-  const run = lastRun();
-  renderWorkflow(run, ui.workflow, true);
-}
-/**
- * A one-line read of the current run for the stage header: what it is doing,
- * and what it cost. This is the "workbench" summary, not the per-turn footer.
- */
-function updateStageStats() {
-  const run = lastRun();
-  ui.stageStats.replaceChildren();
-  if (!run) return;
-  const parts = [];
-  parts.push(run.status);
-  if (run.stats) {
-    if (run.stats.costUsd !== null) parts.push(`$${run.stats.costUsd.toFixed(4)}`);
-    if (run.stats.durationMs !== null) parts.push(`${(run.stats.durationMs / 1000).toFixed(1)} s`);
-    if (run.stats.numTurns !== null) parts.push(`${run.stats.numTurns} turns`);
-  }
-  const calls = run.nodeOrder.filter((id) => run.nodes.get(id)?.kind === 'tool').length;
-  if (calls) parts.push(`${calls} calls`);
-  const text = document.createElement('span');
-  text.className = 'stage-stat';
-  text.dataset.status = run.status;
-  text.textContent = parts.join(' · ');
-  ui.stageStats.append(text);
-}
 let sessionsGranted = false;
 let sessionList = [];
-/** True while the server is reading the transcripts off disk. */
 let sessionsLoading = false;
-/** Which conversation from the list is currently open on the stage. */
 let openSessionId = null;
+
 function formatTime(ms) {
   const d = new Date(ms);
   return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
+
 function renderSessionsPanel() {
   if (!sessionsGranted) {
     ui.sessionsPermission.hidden = false;
@@ -610,13 +524,10 @@ function renderSessionsPanel() {
     ui.sessionsListWrap.hidden = true;
     return;
   }
-  // Granted: the ask disappears, but the way to take it back stays.
   ui.sessionsPermission.hidden = true;
   ui.revokeSessions.hidden = false;
   ui.sessionsListWrap.hidden = false;
   if (sessionsLoading) {
-    // Reading a few dozen transcripts off disk takes a moment; saying so beats
-    // an empty rail that looks broken.
     ui.sessionsEmpty.hidden = false;
     ui.sessionsEmpty.textContent = 'Reading conversations…';
     ui.sessionsList.replaceChildren();
@@ -656,10 +567,7 @@ function renderSessionsPanel() {
     replay.textContent = 'Open';
     replay.addEventListener('click', (event) => {
       event.stopPropagation();
-      // Opening a conversation means: replace the stage with that one
-      // conversation (the lifecycle diagram is one click away).
       clearRuns();
-      setStageView('chat');
       openSessionId = session.id;
       renderSessionsPanel();
       void startRun({ sessionFile: session.id, prompt: session.prompt || 'conversation' });
@@ -669,6 +577,7 @@ function renderSessionsPanel() {
     li.addEventListener('click', () => replay.click());
   }
 }
+
 async function fetchSessions() {
   sessionsLoading = true;
   renderSessionsPanel();
@@ -685,6 +594,7 @@ async function fetchSessions() {
   }
   renderSessionsPanel();
 }
+
 async function grantSessions() {
   try {
     const res = await fetch(withToken('/api/sessions/grant'), { method: 'POST' });
@@ -696,163 +606,31 @@ async function grantSessions() {
   }
   renderSessionsPanel();
 }
+
 async function revokeSessions() {
   try {
     await fetch(withToken('/api/sessions/revoke'), { method: 'POST' });
-  } catch {
-    /* the list simply stays until the next attempt */
-  }
+  } catch {}
   sessionsGranted = false;
   sessionList = [];
   renderSessionsPanel();
 }
+
 ui.grantSessions.addEventListener('click', grantSessions);
 ui.revokeSessions.addEventListener('click', revokeSessions);
 
-let outlineActiveRaf = 0;
-
-/** Highlight the last call above the reading line, so the rail tracks the eye. */
-function markActiveOutline() {
-  outlineActiveRaf = 0;
-  if (!ui.outline.children.length) return;
-  const line = ui.trajectory.getBoundingClientRect().top + 200;
-  let activeKey = null;
-  for (const el of ui.trajectory.querySelectorAll('.tool')) {
-    // Collapsed subagent children have no box; they must not claim the rail.
-    if (!el.getClientRects().length) continue;
-    if (el.getBoundingClientRect().top > line) break;
-    const runId = el.closest('.turn')?.dataset.runId;
-    if (runId && el.dataset.nodeId) activeKey = `${runId}:${el.dataset.nodeId}`;
-  }
-  for (const li of ui.outline.children) {
-    if (li.dataset.key && li.dataset.key === activeKey) li.dataset.active = 'true';
-    else delete li.dataset.active;
-  }
-}
-
-function depthOf(run, node) {
-  let depth = 0;
-  let cur = node;
-  const seen = new Set();
-  while (cur.parentToolUseId && !seen.has(cur.parentToolUseId)) {
-    seen.add(cur.parentToolUseId);
-    const parent = run.nodes.get(cur.parentToolUseId);
-    if (!parent) break;
-    depth++;
-    cur = parent;
-  }
-  return depth;
-}
-
-function renderOutline() {
-  const frag = document.createDocumentFragment();
-  let count = 0;
-
-  order.forEach((runId, index) => {
-    const run = runs.get(runId);
-    const tools = run.nodeOrder.map((id) => run.nodes.get(id)).filter((n) => n?.kind === 'tool');
-    if (!tools.length) return;
-
-    const heading = document.createElement('li');
-    heading.className = 'outline-turn';
-    heading.textContent = `turn ${index + 1} · ${run.status}`;
-    frag.append(heading);
-
-    for (const node of tools) {
-      const li = document.createElement('li');
-      const depth = depthOf(run, node);
-      if (depth > 0) li.classList.add('nested');
-      li.dataset.status = node.status;
-      li.dataset.nodeId = node.id;
-      // Replayed fixtures reuse tool ids across runs, so scope the key to its turn.
-      li.dataset.key = `${runId}:${node.id}`;
-
-      const dot = document.createElement('span');
-      dot.className = 'dot';
-      dot.textContent = STATUS_GLYPH[node.status] ?? '·';
-      const label = document.createElement('span');
-      label.textContent = node.name;
-      li.append(dot, label);
-
-      li.addEventListener('click', () => jumpTo(node));
-      frag.append(li);
-      count++;
-    }
-  });
-
-  ui.outline.replaceChildren(frag);
-  ui.outlineEmpty.hidden = count > 0;
-  if (!outlineActiveRaf) outlineActiveRaf = requestAnimationFrame(markActiveOutline);
-}
-
-function jumpTo(node) {
-  const el = node.__el;
-  if (!el) return;
-  // Jumping from the outline always lands in the dialogue, so switch back if
-  // the lifecycle diagram is on screen.
-  setStageView('chat');
-  const parentSub = el.closest('details.sub');
-  if (parentSub) parentSub.open = true;
-  followOutput = false;
-  el.scrollIntoView({ block: 'center', behavior: reduceMotion.matches ? 'auto' : 'smooth' });
-  el.classList.remove('is-jumped');
-  void el.offsetWidth;
-  el.classList.add('is-jumped');
-  setTimeout(() => el.classList.remove('is-jumped'), 1200);
-}
-
-function refreshComposer() {
-  // `starting` covers the gap between POSTing a turn and the run appearing on
-  // the socket, so the Run button cannot be double-clicked into two runs.
-  const running = anyRunning() || starting;
-  ui.run.disabled = running;
-  ui.stop.hidden = !running;
-  ui.prompt.disabled = running;
-  ui.cwd.disabled = running;
-
-  const last = lastRun();
-  // Only a run that finished has a session worth continuing. After a failure
-  // the id may belong to a conversation the CLI never created, and resuming it
-  // just reproduces the same error.
-  const canResume = last && last.meta.sessionId && last.status === 'finished' && !running;
-
-  if (canResume) {
-    ui.resumeNote.hidden = false;
-    ui.resumeNote.textContent = `Continues session ${short(last.meta.sessionId)}`;
-  } else if (running) {
-    ui.resumeNote.hidden = false;
-    ui.resumeNote.textContent = 'A run is in progress';
-  } else {
-    ui.resumeNote.hidden = true;
-  }
-
-  ui.prompt.placeholder = canResume
-    ? 'Follow up — the agent keeps its context from the previous turn…'
-    : 'Ask the agent to do something…  (⌘/Ctrl + ⏎ to run)';
-}
-
 async function startRun(options = {}) {
-  const prompt = options.prompt ?? ui.prompt.value.trim();
-  if (!prompt && !options.replayFile && !options.sessionFile) return;
-
-  const body = { cwd: ui.cwd.value.trim() };
+  const body = {};
   if (options.replayFile) {
     body.replayFile = options.replayFile;
-    body.prompt = prompt || `replay ${options.replayFile}`;
+    body.prompt = options.prompt || `replay ${options.replayFile}`;
   } else if (options.sessionFile) {
     body.sessionFile = options.sessionFile;
-    body.prompt = prompt || 'replay session';
+    body.prompt = options.prompt || 'replay session';
   } else {
-    body.prompt = prompt;
-    // A live prompt is a new conversation, so nothing in the list is open.
-    openSessionId = null;
-    renderSessionsPanel();
-    const last = lastRun();
-    if (last?.meta.sessionId && last.status === 'finished') body.resumeSessionId = last.meta.sessionId;
+    return;
   }
 
-  starting = true;
-  refreshComposer();
   try {
     const res = await fetch(withToken('/api/turns'), {
       method: 'POST',
@@ -862,18 +640,12 @@ async function startRun(options = {}) {
     if (!res.ok) {
       const detail = await res.json().catch(() => ({}));
       showLocalError(detail.error ?? `request failed (${res.status})`);
-      return;
     }
-    if (!options.replayFile) ui.prompt.value = '';
   } catch (error) {
     showLocalError(`cannot reach the server: ${error.message}`);
-  } finally {
-    starting = false;
-    refreshComposer();
   }
 }
 
-/** Surface a failure that never reached the agent (bad request, no server). */
 function showLocalError(message) {
   const run = lastRun();
   if (!run) {
@@ -883,22 +655,10 @@ function showLocalError(message) {
   run.status = 'failed';
   run.error = message;
   updateFoot(run);
-  refreshComposer();
-}
-
-async function stopRun() {
-  const running = [...runs.values()].filter((run) => run.status === 'running');
-  const target = running[running.length - 1] ?? (activeRunId ? runs.get(activeRunId) : null);
-  if (!target) return;
-  await fetch(withToken(`/api/turns/${target.id}/stop`), { method: 'POST' });
 }
 
 let scrollRaf = 0;
 
-/**
- * Follow new output with a short, interruptible ease rather than a hard jump:
- * each frame recomputes the target because the trajectory keeps growing.
- */
 function scrollToBottom(force = false) {
   if (!force && !followOutput) return;
   if (force || reduceMotion.matches) {
@@ -923,52 +683,26 @@ ui.trajectory.addEventListener('scroll', () => {
   const el = ui.trajectory;
   const top = el.scrollTop;
   const atBottom = el.scrollHeight - top - el.clientHeight < 60;
-  // Scrolling up is a deliberate read; stop chasing the bottom. Scrolling
-  // down is harmless, and our own follow animation only increases scrollTop.
   if (atBottom) followOutput = true;
   else if (top < lastScrollTop) followOutput = false;
   lastScrollTop = top;
-  if (!outlineActiveRaf) outlineActiveRaf = requestAnimationFrame(markActiveOutline);
 });
 
-ui.run.addEventListener('click', () => startRun());
-ui.stop.addEventListener('click', () => stopRun());
-ui.prompt.addEventListener('keydown', (event) => {
-  if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-    event.preventDefault();
-    startRun();
-  }
-});
 ui.noise.addEventListener('change', () => { for (const run of runs.values()) updateFoot(run); });
-function setStageView(name) {
-  stageView = name;
-  const isChat = name === 'chat';
-  ui.viewChat.setAttribute('aria-selected', String(isChat));
-  ui.viewFlow.setAttribute('aria-selected', String(!isChat));
-  ui.trajectory.hidden = !isChat;
-  ui.flowStage.hidden = isChat;
-  if (!isChat) renderWorkflowPanel();
-}
-ui.viewChat.addEventListener('click', () => setStageView('chat'));
-ui.viewFlow.addEventListener('click', () => setStageView('flow'));
 
 ui.clear.addEventListener('click', () => {
-  if (anyRunning()) { window.alert('A run is still going. Stop it first.'); return; }
+  if (anyRunning()) { window.alert('A run is still going.'); return; }
   clearRuns();
   openSessionId = null;
   renderSessionsPanel();
 });
-/** Empty the stage so another conversation can be opened in its place. */
+
 function clearRuns() {
   runs.clear();
   order.length = 0;
   activeRunId = null;
   ui.trajectory.replaceChildren(ui.emptyState);
   ui.emptyState.hidden = false;
-  renderOutline();
-  renderWorkflowPanel();
-  updateStageStats();
-  refreshComposer();
 }
 
 function short(id) {
@@ -977,25 +711,18 @@ function short(id) {
 
 async function boot() {
   connect();
-  refreshComposer();
-  setStageView('chat');
   renderSessionsPanel();
 
-  // ?replay=<fixture> renders a recorded stream on load, which is how the page
-  // is checked from a script (and handy for a demo).
   const params = new URLSearchParams(location.search);
   const replay = params.get('replay');
   if (replay) void startRun({ replayFile: replay, prompt: params.get('prompt') ?? '' });
 
   try {
     const config = await (await fetch(withToken('/api/config'))).json();
-    ui.cwd.value = config.defaultCwd ?? '';
     sessionsGranted = config.sessionsGranted ?? false;
     sessionList = config.sessions ?? [];
     renderSessionsPanel();
-  } catch {
-    /* the banner already says the socket is down */
-  }
+  } catch {}
 }
 
 boot();

@@ -11,12 +11,14 @@ Last updated: 2026-10-22. Kept deliberately, at the user's request.
 
 ## State: the seven features are built, plus an agent workbench on top
 
+## State: the seven features are built, plus a simplified agent workbench
+
 `bun test` → **84 pass**, 0 fail, 158 expect() calls, 5 files.
 `bunx tsc --noEmit` → clean.
 
 Five commits are on `master` and pushed to `github.com/as13546/assignment1`
-(`8db7859` is the newest). **The workbench changes below are not committed yet**
-— see "Remaining work".
+(`8db7859` is the newest). **The workbench and simplification changes below are
+not committed yet** — see "Remaining work".
 
 ## Files
 
@@ -47,16 +49,15 @@ recorded run).
   `subagent_stats.spawned: 1`. Cost $0.418326, 38.3 s, 2 turns.
 - Plain run after the `drive.ts` refactor: status `finished`, Bash call ok, numbers
   from the result event.
-- All four fixtures replay through the HTTP + WebSocket path.
-- Three headless Chrome screenshots of the rendered page: normal run, subagent run,
-  failed run.
+- All four fixtures replay through the HTTP + WebSocket path (smoke-replay still
+  works; the rendered page no longer has the Workflow view).
 
 ### Verified on this machine's real conversations
 
 - 30 conversations listed from `~/.claude/projects` after consent, newest first,
   each with turns / calls / tokens / cwd / first prompt.
 - Opening the newest one: 1 turn on the stage, 30 tool calls rendered, 66 workflow
-  steps, status bar `finished · 962.2 s · 21 turns · 30 calls`.
+  steps, no separate workflow view.
 - Consent really gates it: before granting, the ask is shown and nothing is read;
   after `revoke`, the ask returns and `GET /api/sessions` answers 403.
 - Screenshots in `.shots/`: `conversation-chat.png`, `conversation-flow.png`,
@@ -64,20 +65,57 @@ recorded run).
 
 ## The workbench changes (2026-10-18 → 2026-10-22)
 
+
+## UI simplification — Codex-style workbench (2026-10-22)
+
+Following the user's feedback that the page still felt too complex, the surface
+was trimmed to match the cleaner Codex-style sidebar-and-chat layout shown in the
+reference screenshot. The circled elements in the second screenshot were removed:
+
+1. **Brand title/subtitle** in the top bar — only the logo remains.
+2. **Outline rail** — the middle column is gone; the layout is now two columns
+   (Conversations | Stage).
+3. **Conversation / Workflow tab switcher** — the stage now only shows the
+   conversation/trajectory view. The separate lifecycle diagram view was removed
+   along with `public/workflow.js` usage.
+4. **Bottom composer** — the prompt textarea, Run button, Stop button, and
+   resume note were deleted. The page is now a read-only viewer: runs started
+   from the CLI or opened from the conversation list still render live, but the
+   user cannot type a new prompt into the page.
+
+The remaining controls are: theme switch, Chatter toggle, Clear, and the
+connection indicator. The conversation list still works the same way.
+
+### Files changed
+
+| Path | Change |
+| --- | --- |
+| `public/index.html` | Removed brand text, outline rail, stage tabs, composer |
+| `public/app.js` | Removed outline/workflow/composer code; kept run rendering, sessions, replay |
+| `public/style.css` | Two-column layout; removed outline/workflow/composer styles |
+
+### Verified
+
+- `bun test` → 84 pass.
+- `bun run scripts/smoke-replay.mjs basic.jsonl` against the running server →
+  finished run, 166 ops, tool result rendered.
+- Server serves the simplified page on `http://127.0.0.1:5173/` with no
+  references to the deleted UI elements.
+
 The page stopped being a single transcript viewer and became a workbench: a
-conversation list on the left to enter a conversation, the call outline in the
-middle, and the big screen carrying the interaction and the lifecycle diagram.
+conversation list on the left to enter a conversation and the big screen on the
+right carrying the interaction.
 
 ### Layout
 
-- Three columns: **Conversations** (264px) | **Outline** (208px) | **stage**.
-  The outline column folds below 1280px, the conversation rail below 900px.
-- The stage has a `Conversation` / `Workflow` switch and a status bar that always
-  reads `status · cost · duration · turns · calls`.
-- The old dev "replay a recorded stream" panel at the bottom of the composer was
-  **deleted** along with its CSS. Replay is still reachable via `/?replay=<fixture>`.
-- The dev panel's fixtures buttons were the only UI for fixtures; the deep link
-  and `scripts/smoke-replay.mjs` still cover development.
+- Two columns: **Conversations** (264px) | **stage**. The conversation rail folds
+  below 900px.
+- The stage shows the conversation/trajectory only. The `Conversation` /
+  `Workflow` switch, the outline rail, and the status bar were removed.
+- Replay is still reachable via `/?replay=<fixture>` and
+  `scripts/smoke-replay.mjs` still covers development.
+- The bottom composer (prompt, Run, Stop, resume note) was removed; the page is
+  now a viewer for runs started elsewhere.
 
 ### Conversation list (reads this machine, only after consent)
 
@@ -88,7 +126,7 @@ middle, and the big screen carrying the interaction and the lifecycle diagram.
   where Claude Code keeps the real conversation. Override with `--session-dirs`.
 - Each row shows time, turns, tool calls, tokens, working directory, and the first
   prompt. Opening one clears the stage and streams that conversation back through
-  the same reducer, so both stage views work for imported conversations.
+  the same reducer, so the trajectory view works for imported conversations.
 
 ### Three traps found while building it
 
@@ -187,9 +225,10 @@ bun run scripts/smoke-replay.mjs subagent.jsonl         # headless check of the 
 
 ```powershell
 # The workbench checks (need the server already running):
-python scripts/check-workbench.py http://127.0.0.1:5173      # permissions + both views
+python scripts/check-workbench.py http://127.0.0.1:5173      # permissions + conversation view
 python scripts/capture-conversation.py http://127.0.0.1:5173  # screenshots of a real conversation
 ```
 
 Point the conversation list somewhere else with
 `--session-dirs "H:/a,H:/b"` (default `~/.claude/projects`).
+| `public/workflow.js` | *(deleted)* was the lifecycle diagram; no longer used after the Workflow view was removed |
