@@ -1,11 +1,8 @@
 /*
- * Apple Design workflow diagram: a compact vertical flowchart of one run.
- * Renders the full lifecycle from prompt → agent messages → tool calls and
- * their results → final status with cost / duration / turns. Lives inside the
- * rail as a tab next to the outline.
+ * Apple Design workflow diagram: the full lifecycle of one run as a vertical
+ * flowchart — prompt → agent messages → tool calls and their results → final
+ * status with cost / duration / turns. Drawn on the main stage.
  */
-
-import { renderMarkdown } from './md.js';
 
 const GLYPH = {
   start: '▶',
@@ -18,6 +15,14 @@ const GLYPH = {
 };
 
 const STATUS_GLYPH = { pending: '⏺', ok: '✓', error: '✕' };
+
+/**
+ * The tree is rebuilt on every event, so steps remember whether they have
+ * already played their entrance. Without this the whole diagram would flicker
+ * back to opacity 0 on each of a run's few hundred events.
+ */
+const seenKeys = new Set();
+let seenRunId = null;
 
 function el(tag, className, text) {
   const node = document.createElement(tag);
@@ -46,6 +51,10 @@ export function renderWorkflow(run, container, onJump) {
     container.append(el('p', 'wf-empty', 'Start a run to see its workflow.'));
     return;
   }
+  if (run.id !== seenRunId) {
+    seenKeys.clear();
+    seenRunId = run.id;
+  }
 
   const root = el('div', 'wf-flow');
   container.append(root);
@@ -56,6 +65,7 @@ export function renderWorkflow(run, container, onJump) {
     title: 'You',
     body: run.prompt || '(no prompt)',
     status: 'ok',
+    key: `${run.id}:start`,
   }, onJump && (() => { if (run.els?.root) run.els.root.scrollIntoView({ block: 'center', behavior: 'smooth' }); })));
 
   // Group nodes by parent for subagent branch rendering.
@@ -76,6 +86,7 @@ export function renderWorkflow(run, container, onJump) {
     kind: 'end',
     title: run.status === 'running' ? 'Running' : run.status === 'finished' ? 'Finished' : 'Failed',
     status: run.status === 'running' ? 'pending' : run.status === 'finished' ? 'ok' : 'error',
+    key: `${run.id}:end`,
   }, null);
 
   const meta = el('div', 'wf-meta');
@@ -112,23 +123,32 @@ function renderBranch(parentEl, run, nodes, byParent, depth, onJump) {
 
 function nodeToStep(run, node, onJump) {
   switch (node.kind) {
+    case 'prompt': {
+      return makeStep({
+        kind: 'start',
+        title: 'You',
+        body: short(node.text, 120),
+        status: 'ok',
+        key: node.id,
+      }, onJump && (() => jump(run, node)));
+    }
     case 'text': {
       const body = short(node.text.replace(/\s+/g, ' '), 110);
-      return makeStep({ kind: 'text', title: 'Assistant', body, status: 'neutral' },
+      return makeStep({ kind: 'text', title: 'Assistant', body, status: 'neutral', key: node.id },
         onJump && (() => jump(run, node)));
     }
     case 'thinking': {
-      return makeStep({ kind: 'thinking', title: 'Thinking', body: short(node.text, 80), status: 'neutral' },
+      return makeStep({ kind: 'thinking', title: 'Thinking', body: short(node.text, 80), status: 'neutral', key: node.id },
         onJump && (() => jump(run, node)));
     }
     case 'notice': {
-      return makeStep({ kind: node.level === 'warn' ? 'thinking' : 'text', title: 'Notice', body: short(node.text, 100), status: node.level === 'warn' ? 'error' : 'neutral' },
+      return makeStep({ kind: node.level === 'warn' ? 'thinking' : 'text', title: 'Notice', body: short(node.text, 100), status: node.level === 'warn' ? 'error' : 'neutral', key: node.id },
         onJump && (() => jump(run, node)));
     }
     case 'tool': {
       const title = [node.name, STATUS_GLYPH[node.status] ?? '·'].filter(Boolean).join(' ');
       const body = node.label || '';
-      const step = makeStep({ kind: 'tool', title, body, status: node.status },
+      const step = makeStep({ kind: 'tool', title, body, status: node.status, key: node.id },
         onJump && (() => jump(run, node)));
 
       if (node.result) {
@@ -137,6 +157,7 @@ function nodeToStep(run, node, onJump) {
           title: 'Result',
           body: node.result.preview ? short(node.result.preview, 100) : '(no output)',
           status: node.status,
+          key: `${node.id}:result`,
         }, onJump && (() => jump(run, node)));
         step.querySelector('.wf-card').append(result.querySelector('.wf-card'));
       }
@@ -147,8 +168,14 @@ function nodeToStep(run, node, onJump) {
   }
 }
 
-function makeStep({ kind, title, body, status }, onClick) {
+function makeStep({ kind, title, body, status, key }, onClick) {
   const step = el('div', `wf-step wf-kind-${kind}`);
+  // Only a step the reader has not seen before animates in; a rebuild must
+  // settle instantly or the diagram flickers on every event.
+  if (key && !seenKeys.has(key)) {
+    seenKeys.add(key);
+    step.classList.add('is-new');
+  }
   const track = el('div', 'wf-track');
   const dot = el('span', `wf-dot ${statusClass(status)}`, GLYPH[kind] ?? '·');
   track.append(dot);

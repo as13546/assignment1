@@ -22,23 +22,21 @@ const ui = {
   trajectory: $('trajectory'),
   emptyState: $('empty-state'),
   workflow: $('workflow'),
-  tabOutline: $('tab-outline'),
-  tabFlow: $('tab-flow'),
-  outlinePanel: $('outline-panel'),
-  flowPanel: $('flow-panel'),
-  tabSessions: $('tab-sessions'),
-  sessionsPanel: $('sessions-panel'),
+  flowStage: $('flow-stage'),
+  viewChat: $('view-chat'),
+  viewFlow: $('view-flow'),
+  stageStats: $('stage-stats'),
   sessions: $('sessions'),
   sessionsPermission: $('sessions-permission'),
   sessionsListWrap: $('sessions-list-wrap'),
   sessionsList: $('sessions-list'),
   sessionsEmpty: $('sessions-empty'),
   grantSessions: $('grant-sessions'),
+  revokeSessions: $('revoke-sessions'),
   prompt: $('prompt'),
   run: $('run'),
   stop: $('stop'),
   resumeNote: $('resume-note'),
-  fixtures: $('fixtures'),
 };
 
 const token = new URLSearchParams(location.search).get('token');
@@ -93,8 +91,8 @@ let outlineDirty = false;
 /** True between POSTing a turn and the run showing up over the socket. */
 let starting = false;
 let workflowDirty = false;
-/** Active side panel: 'outline' | 'flow'. */
-let sidePanel = 'outline';
+/** What the big stage shows: 'chat' (dialogue) or 'flow' (lifecycle diagram). */
+let stageView = 'chat';
 
 function makeRun(snapshot) {
   return {
@@ -364,6 +362,7 @@ function updateFoot(run) {
     errorBanner.hidden = true;
   }
   root.classList.toggle('running', run.status === 'running');
+  updateStageStats();
 }
 
 function containerFor(run, node) {
@@ -404,6 +403,18 @@ function updateNode(run, node) {
 
 function renderNode(run, node) {
   switch (node.kind) {
+    case 'prompt': {
+      const div = document.createElement('div');
+      div.className = 'node prompt-node';
+      const who = document.createElement('span');
+      who.className = 'prompt-who';
+      who.textContent = 'You';
+      const body = document.createElement('span');
+      body.className = 'prompt-text';
+      body.textContent = node.text;
+      div.append(who, body);
+      return div;
+    }
     case 'text': {
       const div = document.createElement('div');
       div.className = 'node msg';
@@ -545,15 +556,49 @@ function markOutlineDirty() {
 function markWorkflowDirty() {
   if (workflowDirty) return;
   workflowDirty = true;
-  requestAnimationFrame(() => { workflowDirty = false; renderWorkflowPanel(); });
+  // A run emits a few hundred events; rebuilding the whole tree on each one is
+  // wasted work, and an invisible tree does not need rebuilding at all.
+  if (stageView !== 'flow') return;
+  setTimeout(() => {
+    if (!workflowDirty) return;
+    workflowDirty = false;
+    renderWorkflowPanel();
+  }, 120);
 }
 function renderWorkflowPanel() {
-  // Show the most recent run's lifecycle; the outline already surveys all runs.
+  // Show the most recent run's lifecycle on the big screen.
   const run = lastRun();
   renderWorkflow(run, ui.workflow, true);
 }
+/**
+ * A one-line read of the current run for the stage header: what it is doing,
+ * and what it cost. This is the "workbench" summary, not the per-turn footer.
+ */
+function updateStageStats() {
+  const run = lastRun();
+  ui.stageStats.replaceChildren();
+  if (!run) return;
+  const parts = [];
+  parts.push(run.status);
+  if (run.stats) {
+    if (run.stats.costUsd !== null) parts.push(`$${run.stats.costUsd.toFixed(4)}`);
+    if (run.stats.durationMs !== null) parts.push(`${(run.stats.durationMs / 1000).toFixed(1)} s`);
+    if (run.stats.numTurns !== null) parts.push(`${run.stats.numTurns} turns`);
+  }
+  const calls = run.nodeOrder.filter((id) => run.nodes.get(id)?.kind === 'tool').length;
+  if (calls) parts.push(`${calls} calls`);
+  const text = document.createElement('span');
+  text.className = 'stage-stat';
+  text.dataset.status = run.status;
+  text.textContent = parts.join(' · ');
+  ui.stageStats.append(text);
+}
 let sessionsGranted = false;
 let sessionList = [];
+/** True while the server is reading the transcripts off disk. */
+let sessionsLoading = false;
+/** Which conversation from the list is currently open on the stage. */
+let openSessionId = null;
 function formatTime(ms) {
   const d = new Date(ms);
   return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
@@ -561,25 +606,42 @@ function formatTime(ms) {
 function renderSessionsPanel() {
   if (!sessionsGranted) {
     ui.sessionsPermission.hidden = false;
+    ui.revokeSessions.hidden = true;
     ui.sessionsListWrap.hidden = true;
     return;
   }
+  // Granted: the ask disappears, but the way to take it back stays.
   ui.sessionsPermission.hidden = true;
+  ui.revokeSessions.hidden = false;
   ui.sessionsListWrap.hidden = false;
+  if (sessionsLoading) {
+    // Reading a few dozen transcripts off disk takes a moment; saying so beats
+    // an empty rail that looks broken.
+    ui.sessionsEmpty.hidden = false;
+    ui.sessionsEmpty.textContent = 'Reading conversations…';
+    ui.sessionsList.replaceChildren();
+    return;
+  }
   ui.sessionsEmpty.hidden = sessionList.length > 0;
+  ui.sessionsEmpty.textContent = 'No recent conversations found.';
   ui.sessionsList.replaceChildren();
   for (const session of sessionList) {
     const li = document.createElement('li');
     li.className = 'session-item';
     li.dataset.id = session.id;
+    if (session.id === openSessionId) li.dataset.open = 'true';
     const top = document.createElement('div');
     top.className = 'session-top';
     const when = document.createElement('span');
     when.className = 'session-when';
     when.textContent = formatTime(session.mtime);
+    const facts = [];
+    if (session.turns) facts.push(`${session.turns} turn${session.turns === 1 ? '' : 's'}`);
+    if (session.toolCalls) facts.push(`${session.toolCalls} calls`);
+    if (session.tokens) facts.push(`${Math.round(session.tokens / 1000)}k tokens`);
     const size = document.createElement('span');
     size.className = 'session-size';
-    size.textContent = `${(session.size / 1024).toFixed(1)} KB`;
+    size.textContent = facts.join(' · ');
     top.append(when, size);
     const cwd = document.createElement('div');
     cwd.className = 'session-cwd';
@@ -587,20 +649,29 @@ function renderSessionsPanel() {
     cwd.title = session.cwd || '';
     const preview = document.createElement('div');
     preview.className = 'session-preview';
-    preview.textContent = session.preview || '(no preview)';
+    preview.textContent = session.prompt || '(no prompt recorded)';
     const replay = document.createElement('button');
     replay.type = 'button';
     replay.className = 'session-replay';
-    replay.textContent = 'Replay';
+    replay.textContent = 'Open';
     replay.addEventListener('click', (event) => {
       event.stopPropagation();
-      startRun({ replayFile: null, sessionFile: session.id, prompt: `replay session from ${session.cwd || 'unknown'}` });
+      // Opening a conversation means: replace the stage with that one
+      // conversation (the lifecycle diagram is one click away).
+      clearRuns();
+      setStageView('chat');
+      openSessionId = session.id;
+      renderSessionsPanel();
+      void startRun({ sessionFile: session.id, prompt: session.prompt || 'conversation' });
     });
     li.append(top, cwd, preview, replay);
     ui.sessionsList.append(li);
+    li.addEventListener('click', () => replay.click());
   }
 }
 async function fetchSessions() {
+  sessionsLoading = true;
+  renderSessionsPanel();
   try {
     const res = await fetch(withToken('/api/sessions'));
     const data = await res.json();
@@ -609,8 +680,10 @@ async function fetchSessions() {
   } catch {
     sessionsGranted = false;
     sessionList = [];
+  } finally {
+    sessionsLoading = false;
   }
-  if (sidePanel === 'sessions') renderSessionsPanel();
+  renderSessionsPanel();
 }
 async function grantSessions() {
   try {
@@ -621,9 +694,20 @@ async function grantSessions() {
   } catch {
     sessionsGranted = false;
   }
-  if (sidePanel === 'sessions') renderSessionsPanel();
+  renderSessionsPanel();
+}
+async function revokeSessions() {
+  try {
+    await fetch(withToken('/api/sessions/revoke'), { method: 'POST' });
+  } catch {
+    /* the list simply stays until the next attempt */
+  }
+  sessionsGranted = false;
+  sessionList = [];
+  renderSessionsPanel();
 }
 ui.grantSessions.addEventListener('click', grantSessions);
+ui.revokeSessions.addEventListener('click', revokeSessions);
 
 let outlineActiveRaf = 0;
 
@@ -704,6 +788,9 @@ function renderOutline() {
 function jumpTo(node) {
   const el = node.__el;
   if (!el) return;
+  // Jumping from the outline always lands in the dialogue, so switch back if
+  // the lifecycle diagram is on screen.
+  setStageView('chat');
   const parentSub = el.closest('details.sub');
   if (parentSub) parentSub.open = true;
   followOutput = false;
@@ -757,6 +844,9 @@ async function startRun(options = {}) {
     body.prompt = prompt || 'replay session';
   } else {
     body.prompt = prompt;
+    // A live prompt is a new conversation, so nothing in the list is open.
+    openSessionId = null;
+    renderSessionsPanel();
     const last = lastRun();
     if (last?.meta.sessionId && last.status === 'finished') body.resumeSessionId = last.meta.sessionId;
   }
@@ -850,31 +940,36 @@ ui.prompt.addEventListener('keydown', (event) => {
   }
 });
 ui.noise.addEventListener('change', () => { for (const run of runs.values()) updateFoot(run); });
-function setSidePanel(name) {
-  sidePanel = name;
-  ui.tabOutline.setAttribute('aria-selected', String(name === 'outline'));
-  ui.tabFlow.setAttribute('aria-selected', String(name === 'flow'));
-  ui.tabSessions.setAttribute('aria-selected', String(name === 'sessions'));
-  ui.outlinePanel.hidden = name !== 'outline';
-  ui.flowPanel.hidden = name !== 'flow';
-  ui.sessionsPanel.hidden = name !== 'sessions';
-  if (name === 'flow') renderWorkflowPanel();
-  if (name === 'sessions') renderSessionsPanel();
+function setStageView(name) {
+  stageView = name;
+  const isChat = name === 'chat';
+  ui.viewChat.setAttribute('aria-selected', String(isChat));
+  ui.viewFlow.setAttribute('aria-selected', String(!isChat));
+  ui.trajectory.hidden = !isChat;
+  ui.flowStage.hidden = isChat;
+  if (!isChat) renderWorkflowPanel();
 }
-ui.tabOutline.addEventListener('click', () => setSidePanel('outline'));
-ui.tabFlow.addEventListener('click', () => setSidePanel('flow'));
-ui.tabSessions.addEventListener('click', () => setSidePanel('sessions'));
+ui.viewChat.addEventListener('click', () => setStageView('chat'));
+ui.viewFlow.addEventListener('click', () => setStageView('flow'));
 
 ui.clear.addEventListener('click', () => {
   if (anyRunning()) { window.alert('A run is still going. Stop it first.'); return; }
+  clearRuns();
+  openSessionId = null;
+  renderSessionsPanel();
+});
+/** Empty the stage so another conversation can be opened in its place. */
+function clearRuns() {
   runs.clear();
   order.length = 0;
   activeRunId = null;
   ui.trajectory.replaceChildren(ui.emptyState);
   ui.emptyState.hidden = false;
   renderOutline();
+  renderWorkflowPanel();
+  updateStageStats();
   refreshComposer();
-});
+}
 
 function short(id) {
   return id ? `${id.slice(0, 8)}…` : '';
@@ -883,7 +978,8 @@ function short(id) {
 async function boot() {
   connect();
   refreshComposer();
-  setSidePanel('outline');
+  setStageView('chat');
+  renderSessionsPanel();
 
   // ?replay=<fixture> renders a recorded stream on load, which is how the page
   // is checked from a script (and handy for a demo).
@@ -894,17 +990,9 @@ async function boot() {
   try {
     const config = await (await fetch(withToken('/api/config'))).json();
     ui.cwd.value = config.defaultCwd ?? '';
-    for (const name of config.fixtures ?? []) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.textContent = name;
-      button.addEventListener('click', () => startRun({ replayFile: name, prompt: ui.prompt.value.trim() }));
-      ui.fixtures.append(button);
-    }
-    if (!config.fixtures?.length) ui.fixtures.textContent = '(no fixtures recorded yet)';
     sessionsGranted = config.sessionsGranted ?? false;
     sessionList = config.sessions ?? [];
-    if (sidePanel === 'sessions') renderSessionsPanel();
+    renderSessionsPanel();
   } catch {
     /* the banner already says the socket is down */
   }

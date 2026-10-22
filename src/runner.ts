@@ -1,5 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { LineDecoder, countLines, readEventFile } from './lines.ts';
+import { transcriptEvents } from './transcript.ts';
 import type { RawEvent } from './types.ts';
 
 export interface TurnRequest {
@@ -9,6 +11,8 @@ export interface TurnRequest {
   resumeSessionId?: string | null;
   /** Replay a recorded .jsonl instead of spawning the agent (dev only). */
   replayFile?: string | null;
+  /** Replay a Claude Code conversation transcript from this computer. */
+  transcriptFile?: string | null;
   /** Delay between replayed events, so the UI still streams visibly. */
   replayDelayMs?: number;
   /** Auto-approve everything. Only ever set for a scratch directory. */
@@ -29,80 +33,10 @@ export type RunnerMessage =
   | { kind: 'exit'; code: number | null; timedOut: boolean }
   | { kind: 'spawn_error'; message: string };
 
+export { LineDecoder, readEventFile };
+
 /** Default: five minutes is generous for a demo-sized task. */
 const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000;
-
-/**
- * Splits a byte stream into lines, taking the encoding from the BOM: PowerShell
- * `claude ... > events.jsonl` writes UTF-16LE. Splitting on bytes means a
- * multi-byte character is never cut in half.
- */
-export class LineDecoder {
-  private buf: Buffer = Buffer.alloc(0);
-  private enc: 'utf8' | 'utf16le' = 'utf8';
-  private decided = false;
-
-  push(chunk: Buffer): string[] {
-    this.buf = this.buf.length ? Buffer.concat([this.buf, chunk]) : chunk;
-
-    if (!this.decided) {
-      if (this.buf.length >= 2 && this.buf[0] === 0xff && this.buf[1] === 0xfe) {
-        this.enc = 'utf16le';
-        this.buf = this.buf.subarray(2);
-        this.decided = true;
-      } else if (this.buf.length >= 3 && this.buf[0] === 0xef && this.buf[1] === 0xbb && this.buf[2] === 0xbf) {
-        this.buf = this.buf.subarray(3);
-        this.decided = true;
-      } else if (this.buf.length >= 1) {
-        this.decided = true;
-      }
-    }
-
-    const lines: string[] = [];
-    let start = 0;
-    for (let i = 0; i < this.buf.length; i++) {
-      if (this.enc === 'utf8') {
-        if (this.buf[i] !== 0x0a) continue;
-        lines.push(this.decode(this.buf.subarray(start, i)));
-        start = i + 1;
-      } else {
-        if (this.buf[i] !== 0x0a || this.buf[i + 1] !== 0x00) continue;
-        lines.push(this.decode(this.buf.subarray(start, i)));
-        start = i + 2;
-        i++;
-      }
-    }
-    this.buf = this.buf.subarray(start);
-    return lines.map((l) => l.replace(/\r$/, '')).filter((l) => l.length > 0);
-  }
-
-  /** Anything left after the stream closed (a file with no trailing newline). */
-  flush(): string[] {
-    const rest = this.decode(this.buf).replace(/\r?\n?$/, '');
-    this.buf = Buffer.alloc(0);
-    return rest ? [rest] : [];
-  }
-
-  private decode(bytes: Buffer): string {
-    // Buffer.toString('utf16le') needs an even byte count; a trailing newline
-    // byte-pair is already stripped, but be defensive about odd leftovers.
-    if (this.enc === 'utf16le') {
-      const even = bytes.length % 2 === 0 ? bytes : bytes.subarray(0, bytes.length - 1);
-      return even.toString('utf16le');
-    }
-    return bytes.toString('utf8');
-  }
-
-  get encoding(): 'utf8' | 'utf16le' {
-    return this.enc;
-  }
-}
-
-export function readEventFile(file: string): string[] {
-  const bytes = fs.readFileSync(file);
-  const decoder = new LineDecoder();
-  return [...decoder.push(bytes), ...decoder.flush()];
-}
 
 function parseLine(line: string): RawEvent | null {
   try {
@@ -132,11 +66,54 @@ export async function* runTurn(
   req: TurnRequest,
   abort?: AbortSignal,
 ): AsyncGenerator<RunnerMessage> {
+  if (req.transcriptFile) {
+    yield* transcriptTurn(req, abort);
+    return;
+  }
   if (req.replayFile) {
     yield* replayTurn(req, abort);
     return;
   }
   yield* spawnTurn(req, abort);
+}
+
+/**
+ * Replay a conversation the user has already had with Claude Code. Its events
+ * are normalised as they are read, so the page streams them exactly like a
+ * live run instead of appearing all at once at the end.
+ */
+async function* transcriptTurn(
+  req: TurnRequest,
+  abort?: AbortSignal,
+): AsyncGenerator<RunnerMessage> {
+  const file = path.resolve(req.transcriptFile!);
+  if (!fs.existsSync(file)) {
+    yield { kind: 'spawn_error', message: `conversation not found: ${file}` };
+    return;
+  }
+  const delay = req.replayDelayMs ?? 0;
+  // A real conversation can hold thousands of records, and a fixed per-event
+  // delay would turn opening one into a multi-minute wait. Spread the budget
+  // across the records instead, and skip the pause entirely at delay 0.
+  const records = Math.max(1, countLines(file));
+  const perEvent = delay > 0 ? Math.min(delay, Math.max(0, Math.floor(20_000 / records))) : 0;
+  let due = Date.now();
+  try {
+    for await (const event of transcriptEvents(file)) {
+      if (abort?.aborted) break;
+      yield { kind: 'raw', event };
+      // Pace the stream so a long conversation is watchable rather than a
+      // single frame, but never fall behind the clock.
+      if (perEvent > 0) {
+        due += perEvent;
+        const wait = due - Date.now();
+        if (wait > 0) await sleep(wait);
+      }
+    }
+  } catch (error) {
+    yield { kind: 'stderr', text: `cannot read conversation: ${(error as Error).message}` };
+  }
+  yield { kind: 'exit', code: 0, timedOut: false };
 }
 
 async function* replayTurn(req: TurnRequest, abort?: AbortSignal): AsyncGenerator<RunnerMessage> {

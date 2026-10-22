@@ -3,6 +3,7 @@ import path from 'node:path';
 import { buildArgs, type TurnRequest } from './runner.ts';
 import { driveRun } from './drive.ts';
 import { createRunState } from './translate.ts';
+import { defaultTranscriptRoot, listTranscripts, type TranscriptInfo } from './transcript.ts';
 import type { RunState } from './types.ts';
 
 const PUBLIC_DIR = path.resolve(import.meta.dir, '..', 'public');
@@ -44,8 +45,8 @@ function parseArgs(argv: string[]): Config {
     .filter(Boolean)
     .map((s) => path.resolve(s));
   if (!roots.length) {
-    roots.push(defaultCwd);
-    roots.push(path.resolve(defaultCwd, '..'));
+    // Claude Code keeps every conversation under the user's home directory.
+    roots.push(defaultTranscriptRoot());
   }
   return {
     port: Number(get('--port') ?? process.env.PORT ?? 5173),
@@ -64,91 +65,33 @@ const runs = new Map<string, Run>();
 
 const clients = new Set<Bun.ServerWebSocket<unknown>>();
 
-interface SessionInfo {
-  id: string;
-  path: string;
-  cwd: string | null;
-  mtime: number;
-  size: number;
-  preview: string;
+let sessionsGranted = false;
+
+// Summarising a transcript means reading it, so the result is cached briefly:
+// switching tabs must not re-read every conversation on disk.
+let sessionCache: { at: number; sessions: TranscriptInfo[] } | null = null;
+const SESSION_CACHE_MS = 15_000;
+
+async function scanSessions(): Promise<TranscriptInfo[]> {
+  if (sessionCache && Date.now() - sessionCache.at < SESSION_CACHE_MS) {
+    return sessionCache.sessions;
+  }
+  const sessions = await listTranscripts(config.sessionScanRoots);
+  sessionCache = { at: Date.now(), sessions };
+  return sessions;
 }
 
-let sessionsGranted = false;
-const SESSION_MAX_DEPTH = 4;
-
+/**
+ * Reading another conversation is the most sensitive thing this page can do,
+ * so it happens only after the user presses Allow, and only inside the roots
+ * the server was pointed at.
+ */
 function isUnderRoots(file: string): boolean {
   const resolved = path.resolve(file);
   return config.sessionScanRoots.some((root) => {
     const r = path.resolve(root);
     return resolved === r || resolved.startsWith(r + path.sep);
   });
-}
-
-function findEventFiles(dir: string, depth: number): string[] {
-  if (depth > SESSION_MAX_DEPTH) return [];
-  const found: string[] = [];
-  try {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const full = path.join(dir, entry.name);
-      if (entry.isDirectory() && entry.name !== 'node_modules' && entry.name !== '.git') {
-        found.push(...findEventFiles(full, depth + 1));
-      } else if (entry.isFile() && entry.name === 'events.jsonl') {
-        found.push(full);
-      }
-    }
-  } catch {
-    /* ignore unreadable directories */
-  }
-  return found;
-}
-
-function summarizeSession(file: string): SessionInfo {
-  const stat = fs.statSync(file);
-  let cwd: string | null = path.dirname(file);
-  let preview = '';
-  try {
-    const decoder = new TextDecoder();
-    const fd = fs.openSync(file, 'r');
-    const bytes = new Uint8Array(65536);
-    const n = fs.readSync(fd, bytes, 0, bytes.length, 0);
-    fs.closeSync(fd);
-    const head = decoder.decode(bytes.subarray(0, n));
-    for (const line of head.split('\n')) {
-      if (!line.trim()) continue;
-      try {
-        const ev = JSON.parse(line);
-        if (ev.type === 'system' && ev.subtype === 'init' && ev.cwd) cwd = String(ev.cwd);
-        if (!preview && ev.type === 'assistant' && Array.isArray(ev.message?.content)) {
-          const text = ev.message.content.find((b: Record<string, unknown>) => b.type === 'text' && typeof b.text === 'string');
-          if (text) preview = String(text.text).slice(0, 120);
-        }
-        if (!preview && ev.type === 'result' && typeof ev.result === 'string') {
-          preview = ev.result.slice(0, 120);
-        }
-      } catch {
-        /* ignore malformed lines */
-      }
-    }
-  } catch {
-    /* ignore read errors */
-  }
-  return {
-    id: Buffer.from(file).toString('base64url'),
-    path: file,
-    cwd,
-    mtime: stat.mtimeMs,
-    size: stat.size,
-    preview,
-  };
-}
-
-function scanSessions(): SessionInfo[] {
-  const files = config.sessionScanRoots.flatMap((root) => findEventFiles(root, 0));
-  const unique = [...new Set(files)];
-  return unique
-    .filter((file) => fs.statSync(file).size > 0)
-    .map(summarizeSession)
-    .sort((a, b) => b.mtime - a.mtime);
 }
 
 function resolveSession(id: string): string | null {
@@ -281,7 +224,8 @@ function startRun(body: Record<string, unknown>): { runId: string } | { error: s
     prompt,
     cwd,
     resumeSessionId,
-    replayFile: replayPath ?? sessionFile,
+    replayFile: replayPath,
+    transcriptFile: sessionFile,
     replayDelayMs: config.replayDelayMs,
     skipPermissions: body.skipPermissions === undefined
       ? config.skipPermissionsDefault
@@ -299,10 +243,14 @@ function startRun(body: Record<string, unknown>): { runId: string } | { error: s
     argv: replayPath
       ? ['replay', path.relative(FIXTURES_DIR, replayPath)]
       : sessionFile
-      ? ['replay', path.relative(process.cwd(), sessionFile)]
+      ? ['conversation', path.basename(sessionFile)]
       : [config.claudeBin, ...buildArgs(req).map((arg, i) => (i === 0 ? '<prompt>' : arg))],
     resumedFrom: resumeSessionId,
-    replayed: replayPath ? path.relative(FIXTURES_DIR, replayPath) : null,
+    replayed: replayPath
+      ? path.relative(FIXTURES_DIR, replayPath)
+      : sessionFile
+      ? path.basename(sessionFile)
+      : null,
     startedAt: Date.now(),
     state: createRunState(),
     abort: new AbortController(),
@@ -349,7 +297,7 @@ const server = Bun.serve({
         skipPermissions: config.skipPermissionsDefault,
         fixtures: listFixtures(),
         sessionsGranted,
-        sessions: sessionsGranted ? scanSessions() : [],
+        sessions: sessionsGranted ? await scanSessions() : [],
         runs: [...runs.values()].map(runSnapshot),
       });
     }
@@ -368,7 +316,7 @@ const server = Bun.serve({
       if (!sessionsGranted) {
         return Response.json({ granted: false, sessions: [] }, { status: 403 });
       }
-      return Response.json({ granted: true, sessions: scanSessions() });
+      return Response.json({ granted: true, sessions: await scanSessions() });
     }
 
     if (url.pathname === '/api/turns' && req.method === 'POST') {

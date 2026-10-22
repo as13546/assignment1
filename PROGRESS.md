@@ -1,24 +1,35 @@
 # Progress checkpoint — CS2680 assignment 1 (Part 2, the frontend)
 
-Last updated: 2026-10-16. Working file, not a deliverable — delete before submitting.
+Last updated: 2026-10-22. Working file, kept deliberately (the user asked for it
+to stay and to carry the record of the later changes).
 
-## State: the seven features are built and verified against real runs
+## State: the seven features are built, plus an agent workbench on top
 
-`bun test` → 78 pass, 0 fail. `bunx tsc --noEmit` → clean.
+`bun test` → **84 pass**, 0 fail, 158 expect() calls, 5 files.
+`bunx tsc --noEmit` → clean.
+
+Five commits are on `master` and pushed to `github.com/as13546/assignment1`
+(`8db7859` is the newest). **The workbench changes below are not committed yet**
+— see "Remaining work".
 
 ## Files
 
 | Path | What |
 | --- | --- |
-| `src/runner.ts` | spawn or replay; byte-level line splitting with UTF-16LE BOM detection |
+| `src/runner.ts` | spawn, fixture replay, or conversation replay; dispatches on the request |
+| `src/lines.ts` | BOM-aware line splitting (UTF-16LE), `countLines`, streaming `readLines` |
+| `src/transcript.ts` | reads this machine's Claude Code conversations and rewrites them into the event stream the reducer already understands |
 | `src/translate.ts` | the reducer: noise folding, tool pairing, subagent tree, redaction |
 | `src/drive.ts` | one run's lifecycle and final status |
 | `src/server.ts` | `Bun.serve`: HTTP, WebSocket, static, optional token |
 | `public/md.js` | hand-written Markdown renderer, escapes first, refuses `javascript:` hrefs |
+| `public/workflow.js` | draws one run as a vertical lifecycle diagram |
 | `public/index.html`, `app.js`, `style.css` | the page |
 | `fixtures/` | four real recorded runs (see README) |
-| `tests/` | 78 tests, including the spawn path via `tests/helpers/fake-claude.mjs` |
+| `tests/` | 84 tests, including the spawn path via `tests/helpers/fake-claude.mjs` |
 | `scripts/smoke-replay.mjs` | headless end-to-end check over the real WebSocket |
+| `scripts/check-workbench.py` | end-to-end check of the conversation list, permissions, and both stage views |
+| `scripts/capture-*.py` | Playwright screenshot helpers used to check the rendering |
 
 Sibling directories: `H:/init_claude/demo-repo` (the Python `logparse` the agent works
 on, with two deliberately failing tests), `H:/init_claude/test_events` (the user's

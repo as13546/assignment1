@@ -104,7 +104,14 @@ export interface NoticeNode extends NodeBase {
   text: string;
 }
 
-export type Node = TextNode | ThinkingNode | ToolNode | NoticeNode;
+/** A prompt the human typed. Only imported conversations have these inside a
+ *  run; a live run carries its prompt on the turn itself. */
+export interface PromptNode extends NodeBase {
+  kind: 'prompt';
+  text: string;
+}
+
+export type Node = TextNode | ThinkingNode | ToolNode | NoticeNode | PromptNode;
 
 export interface RunStats {
   costUsd: number | null;

@@ -61,55 +61,57 @@
 
 <main class="layout">
 
-  <aside id="outline-rail" class="rail" aria-label="Trajectory outline">
-    <div class="rail-tabs" role="tablist" aria-label="Side panel">
-      <button id="tab-outline" class="rail-tab" role="tab" aria-selected="true" aria-controls="outline-panel">Outline</button>
-      <button id="tab-flow" class="rail-tab" role="tab" aria-selected="false" aria-controls="flow-panel">Flow</button>
-      <button id="tab-sessions" class="rail-tab" role="tab" aria-selected="false" aria-controls="sessions-panel">Sessions</button>
+  <aside id="conversations-rail" class="rail rail-conversations" aria-label="Conversations">
+    <div class="rail-head">
+      <span>Conversations</span>
+      <span class="rail-hint">From this computer</span>
     </div>
-    <div id="outline-panel" class="rail-panel" role="tabpanel">
-      <div class="rail-head">
-        <span>Outline</span>
-        <span class="rail-hint">Click to jump</span>
+    <div id="sessions" class="sessions">
+      <div id="sessions-permission" class="sessions-permission">
+        <p id="sessions-permission-text">Allow this page to read recent Claude Code session files from your computer?</p>
+        <button id="grant-sessions" class="primary" type="button">Allow</button>
       </div>
-      <ol id="outline" class="outline"></ol>
-      <p id="outline-empty" class="rail-empty">Calls appear here as the agent makes them.</p>
-    </div>
-    <div id="flow-panel" class="rail-panel" role="tabpanel" hidden>
-      <div class="rail-head">
-        <span>Workflow</span>
-        <span class="rail-hint">Full lifecycle</span>
+      <div id="sessions-list-wrap" hidden>
+        <p id="sessions-empty" class="rail-empty">No recent sessions found.</p>
+        <ul id="sessions-list" class="sessions-list"></ul>
       </div>
-      <div id="workflow" class="workflow"></div>
-    </div>
-    <div id="sessions-panel" class="rail-panel" role="tabpanel" hidden>
-      <div class="rail-head">
-        <span>Sessions</span>
-        <span class="rail-hint">Recent runs</span>
-      </div>
-      <div id="sessions" class="sessions">
-        <div id="sessions-permission" class="sessions-permission">
-          <p>Allow this page to read recent Claude Code session files from your computer?</p>
-          <button id="grant-sessions" class="primary" type="button">Allow</button>
-        </div>
-        <div id="sessions-list-wrap" hidden>
-          <p id="sessions-empty" class="rail-empty">No recent sessions found.</p>
-          <ul id="sessions-list" class="sessions-list"></ul>
-        </div>
-      </div>
+      <button id="revoke-sessions" class="ghost sessions-revoke" type="button" hidden>Stop sharing</button>
     </div>
   </aside>
 
-  <section id="trajectory" class="trajectory">
-    <div id="empty-state" class="empty-state">
-      <div class="empty-mark" aria-hidden="true">
-        <svg viewBox="0 0 24 24" fill="none">
-          <path d="M12 3.5c.5 3.9 1.6 5 5.5 5.5-3.9.5-5 1.6-5.5 5.5-.5-3.9-1.6-5-5.5-5.5 3.9-.5 5-1.6 5.5-5.5Z" fill="currentColor"/>
-          <path d="M18 14.5c.25 1.95.8 2.5 2.75 2.75-1.95.25-2.5.8-2.75 2.75-.25-1.95-.8-2.5-2.75-2.75 1.95-.25 2.5-.8 2.75-2.75Z" fill="currentColor" opacity=".7"/>
-        </svg>
-      </div>
-      <h1>Point an agent at a repository<br>and watch it work.</h1>
+  <aside id="outline-rail" class="rail rail-outline" aria-label="Trajectory outline">
+    <div class="rail-head">
+      <span>Outline</span>
+      <span class="rail-hint">Click to jump</span>
     </div>
+    <ol id="outline" class="outline"></ol>
+    <p id="outline-empty" class="rail-empty">Calls appear here as the agent makes them.</p>
+  </aside>
+
+  <section class="stage">
+    <div class="stage-bar">
+      <div class="viewswitch" role="tablist" aria-label="Stage view">
+        <button id="view-chat" class="viewswitch-btn" role="tab" aria-selected="true">Conversation</button>
+        <button id="view-flow" class="viewswitch-btn" role="tab" aria-selected="false">Workflow</button>
+      </div>
+      <div id="stage-stats" class="stage-stats"></div>
+    </div>
+
+    <section id="trajectory" class="trajectory">
+      <div id="empty-state" class="empty-state">
+        <div class="empty-mark" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none">
+            <path d="M12 3.5c.5 3.9 1.6 5 5.5 5.5-3.9.5-5 1.6-5.5 5.5-.5-3.9-1.6-5-5.5-5.5 3.9-.5 5-1.6 5.5-5.5Z" fill="currentColor"/>
+            <path d="M18 14.5c.25 1.95.8 2.5 2.75 2.75-1.95.25-2.5.8-2.75 2.75-.25-1.95-.8-2.5-2.75-2.75 1.95-.25 2.5-.8 2.75-2.75Z" fill="currentColor" opacity=".7"/>
+          </svg>
+        </div>
+        <h1>Point an agent at a repository<br>and watch it work.</h1>
+      </div>
+    </section>
+
+    <section id="flow-stage" class="flow-stage" hidden>
+      <div id="workflow" class="workflow"></div>
+    </section>
   </section>
 
 </main>
@@ -124,15 +126,6 @@
         <button id="run" class="primary" type="button">Run</button>
       </div>
     </div>
-    <details id="dev" class="dev">
-      <summary>Replay a recorded stream instead of spawning the agent</summary>
-      <p class="dev-note">
-        Replay is instant and free, which is how the rendering was developed. It is
-        <strong>not</strong> a substitute for a live run in the demo — it cannot show events
-        arriving late, and it has no real session id to resume.
-      </p>
-      <div id="fixtures" class="fixtures"></div>
-    </details>
   </div>
 </footer>
 

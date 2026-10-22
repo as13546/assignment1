@@ -13,8 +13,9 @@ with sync_playwright() as p:
     )
     page = context.new_page()
     page.goto(url, wait_until='networkidle')
-    page.wait_for_timeout(1200)
-    page.click('#tab-flow')
+    # Let the replay stream in and settle (444 events at the default delay).
+    page.wait_for_timeout(20000)
+    page.click('#view-flow')
     page.wait_for_timeout(600)
     page.screenshot(path=out, full_page=False)
     browser.close()

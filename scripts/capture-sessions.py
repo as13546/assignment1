@@ -24,18 +24,8 @@ with sync_playwright() as p:
     # Empty state screenshot first
     page.screenshot(path=out.replace('.png', '-empty.png'), full_page=False)
     # Switch to Sessions tab
-    page.click('#tab-sessions')
+    page.click('#grant-sessions')
     page.wait_for_timeout(400)
-    page.screenshot(path=out.replace('.png', '-permission.png'), full_page=False)
-    # Grant server-side and reload so the granted list renders.
-    try:
-        req = urllib.request.Request(f'{url}/api/sessions/grant', method='POST')
-        urllib.request.urlopen(req, timeout=5)
-    except Exception as e:
-        print('grant failed:', e)
-    page.goto(url, wait_until='networkidle')
-    page.wait_for_timeout(400)
-    page.click('#tab-sessions')
     page.wait_for_timeout(600)
     page.screenshot(path=out.replace('.png', '-list.png'), full_page=False)
     browser.close()

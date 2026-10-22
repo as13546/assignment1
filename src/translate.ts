@@ -1,5 +1,5 @@
 import type {
-  Node, NoticeNode, Op, RawContentBlock, RawEvent, RunState, RunStats,
+  Node, NoticeNode, Op, PromptNode, RawContentBlock, RawEvent, RunState, RunStats,
   TextNode, ThinkingNode, ToolNode, ToolResult, TreeNode, ToolStatus,
 } from './types.ts';
 
@@ -169,6 +169,22 @@ export function applyEvent(state: RunState, raw: RawEvent): Op[] {
           };
           state.nodes.push(notice);
           ops.push({ op: 'node', node: notice });
+          return ops;
+        }
+        // Only an imported conversation has prompts inside a run: a live run
+        // carries its prompt on the turn itself.
+        case 'user_prompt': {
+          const text = typeof raw.content === 'string' ? raw.content.trim() : '';
+          if (!text) return ops;
+          const node: PromptNode = {
+            kind: 'prompt',
+            id: `n${state.nodes.length}`,
+            parentToolUseId: null,
+            seq: nextSeq(state),
+            text: redactSecrets(text),
+          };
+          state.nodes.push(node);
+          ops.push({ op: 'node', node });
           return ops;
         }
         default:
