@@ -62,7 +62,6 @@ bun run src/server.ts --cwd /path/to/a/repo
 实时运行在页面上是同一套渲染，没有第二套代码。
 
 | 文件 | 职责 |
-| --- | --- |
 | `src/runner.ts` | 唯一启动子进程的地方；负责三种数据源的分派（实时 / fixture / 会话记录） |
 | `src/lines.ts` | 按 BOM 判断编码的逐行切分（UTF-16LE 的 PowerShell 陷阱在这里处理） |
 | `src/transcript.ts` | 读本机的 Claude Code 会话记录，把它改写成归约器认识的事件流 |
@@ -98,9 +97,6 @@ bun run src/server.ts --cwd /path/to/a/repo
 
 ## 页面结构
 
-页面现在是一个**只读的查看器**：从左边点开一段对话，右边显示它当时的完整过程。
-发起新任务、停止、继续上一轮这些操作后端仍然支持（见下文「接口」），只是页面上
-不再放输入框。
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -132,22 +128,5 @@ bun run scripts/smoke-replay.mjs subagent.jsonl
 
 回放是开发用的便利手段，被限制为只能读 `fixtures/` 目录内的文件。它**不能替代真实运行**：它演示不了「事件边到边陆续到达」，它里面的 session id 也不能真的 resume。
 
-## 接口
 
-页面不直接调这些接口，但改代码时用得上。`/ws` 是 WebSocket，页面从它接收
-`snapshot` / `run_started` / `ops` / `run_end` 四类消息；其余是普通 HTTP。
 
-| 方法与路径 | 作用 |
-| --- | --- |
-| `GET /api/config` | 默认工作目录、CLI 路径、fixture 列表、会话授权状态与列表、当前所有运行的快照 |
-| `POST /api/turns` | 起一次运行。`prompt` 提交新任务，`replayFile` 回放 fixture，`sessionFile` 回放一段本机会话，`resumeSessionId` 继续上一轮 |
-| `POST /api/turns/:id/stop` | 中止指定运行 |
-| `GET /api/sessions` | 列出本机会话。**未授权时返回 403** |
-| `POST /api/sessions/grant` | 授权读取；这是唯一会让服务器去碰磁盘的入口 |
-| `POST /api/sessions/revoke` | 收回授权，之后 `/api/sessions` 重新变成 403 |
-
-## 对外暴露
-
-这个页面本质上是「一个能读文件、能跑命令的进程」的远程控制器，所以默认只绑 `127.0.0.1`。如果要从别的机器访问，请用 `--token $(openssl rand -hex 16)` 并把 token 排除在仓库之外；任何不带 token 的请求都会收到 401。另外，把 agent 指向一个临时目录而不是你的家目录——**页面会把它读到的一切都展示出来**（演示视频和截图也一样）。
-
-服务器默认会传 `--dangerously-skip-permissions`，这只对临时目录是安全的选择。其他情况下请用 `--no-skip-permissions` 启动。
